@@ -2,7 +2,6 @@ package main
 
 import (
 	"crawler"
-	"fmt"
 	"time"
 )
 
@@ -10,18 +9,19 @@ import (
 var done = make(chan struct{})
 
 func main() {
-	// 创建Register爬虫，爬repo list
-	rc := crawler.GetRegRepoListCollector()
-	// 递归[]string{"00"-"zz"}, 不停尝试直到RepoList.Count < 9500, 只需要制定一个轮换规则, 记录当前状态即可
+	//// 递归[]string{"00"-"zz"}, 不停尝试直到RepoList.Count < 9500, 只需要制定一个轮换规则, 记录当前状态即可
+	//
+	//// 当找到关键字使RepoList.Count < 9000时，遍历每一页，爬取仓库信息
+	//go crawler.ScrapeRegRepoListRecursive("mongo", "community")
+	//
+	//// 处理Repo list，对每个Repo递归找Tag
+	//time.Sleep(time.Second * 5)
+	//for r := range crawler.ChannelRegRepoList {
+	//	fmt.Println(r)
+	//}
 
-	// 当找到关键字使RepoList.Count < 9000时，遍历每一页，爬取仓库信息
-	go crawler.ScrapeRegRepoListRecursive(rc, "mongo", "community")
-
-	// 处理Repo list，对每个Repo递归找Tag
-	time.Sleep(time.Second * 5)
-	for r := range crawler.ChannelRegRepoList {
-		fmt.Println(r)
-	}
+	c := crawler.GetRepoMetadataCollector()
+	c.Visit(crawler.GetRepoMetaURL("aa281916", "getting-started"))
 
 	//fmt.Println(crawler.GetNamespaceURL("aa281916", "1", "4"))
 	//fmt.Println(crawler.GetRepoMetaURL("aa281916", "getting-started"))
@@ -33,7 +33,7 @@ func main() {
 	//	c.Visit(strings.Replace(RegURLTemplate, "{PAGE}", i, 1))
 	//}
 
-	go func() { done <- struct{}{} }()
+	go func() { time.Sleep(time.Second * 3); done <- struct{}{} }()
 	// 退出程序
 	<-done
 }

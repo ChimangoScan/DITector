@@ -14,6 +14,11 @@ func GetDockerHubCollector() *colly.Collector {
 		colly.AllowedDomains("hub.docker.com"),
 	)
 
+	// 关keep-alive
+	c.WithTransport(&http.Transport{
+		DisableKeepAlives: true,
+	})
+
 	// 配置Collector
 	// 配置代理池
 	//if p, err := proxy.RoundRobinProxySwitcher(
@@ -27,13 +32,15 @@ func GetDockerHubCollector() *colly.Collector {
 	return c
 }
 
-// GetRegRepoListCollector 为爬取指定Register的Repo list的Collector绑定回调函数
-func GetRegRepoListCollector() *colly.Collector {
+// GetRegRepoListCollector 为爬取指定Register的Repo list的Collector绑定回调函数。
+// 爬取顺利的情况下，向chRegRepoList通道中传入爬到的RegisterRepoList__结果。
+// 测试通过！！！
+func GetRegRepoListCollector(chRegRepoList chan RegisterRepoList__) *colly.Collector {
 	c := GetDockerHubCollector()
 
 	// 绑定回调函数
 	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("FROM RegisterCollector-----------------------Requesting")
+		fmt.Println("FROM RegRepoListCollector-----------------------Request")
 		fmt.Println("Visiting: ", r.URL)
 		// 查看request时使用的proxy
 		fmt.Println("Proxy: ", r.ProxyURL)
@@ -43,16 +50,16 @@ func GetRegRepoListCollector() *colly.Collector {
 
 	// 处理JSON
 	c.OnResponse(func(r *colly.Response) {
-		fmt.Println("FROM RegisterCollector-----------------------Response")
+		fmt.Println("FROM RegRepoListCollector-----------------------Response")
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
 
-		var RegisterRepoList RegisterRepoList__
-		if err := json.Unmarshal([]byte(r.Body), &RegisterRepoList); err != nil {
-			fmt.Println("Error Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
+		var RegRepoList RegisterRepoList__
+		if err := json.Unmarshal([]byte(r.Body), &RegRepoList); err != nil {
+			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
 			fmt.Println(err)
 		}
-		ChannelRegRepoList <- RegisterRepoList
+		chRegRepoList <- RegRepoList
 	})
 
 	return c
@@ -62,14 +69,9 @@ func GetRegRepoListCollector() *colly.Collector {
 func GetRepoMetadataCollector() *colly.Collector {
 	c := GetDockerHubCollector()
 
-	// 爬Tag不需要考虑keep-alive
-	c.WithTransport(&http.Transport{
-		DisableKeepAlives: true,
-	})
-
 	// 绑定回调函数
 	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("FROM RepoMetadataCollector-----------------------Requesting")
+		fmt.Println("FROM RepoMetadataCollector-----------------------Request")
 		fmt.Println("Visiting: ", r.URL)
 		// 查看request时使用的proxy
 		fmt.Println("Proxy: ", r.ProxyURL)
@@ -83,6 +85,12 @@ func GetRepoMetadataCollector() *colly.Collector {
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
 
+		var Repo Repository__
+		if err := json.Unmarshal([]byte(r.Body), &Repo); err != nil {
+			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
+			fmt.Println(err)
+		}
+		fmt.Println(Repo)
 	})
 
 	return c
