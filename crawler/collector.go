@@ -65,8 +65,9 @@ func GetRegRepoListCollector(chRegRepoList chan RegisterRepoList__) *colly.Colle
 	return c
 }
 
-// GetRepoMetadataCollector 为爬取指定Repository的Tag list的Collector绑定回调函数
-func GetRepoMetadataCollector() *colly.Collector {
+// GetRepoMetadataCollector 为爬取指定Repository的Tag list的Collector绑定回调函数。
+// 测试通过！！！
+func GetRepoMetadataCollector(Repo Repository__) *colly.Collector {
 	c := GetDockerHubCollector()
 
 	// 绑定回调函数
@@ -85,7 +86,7 @@ func GetRepoMetadataCollector() *colly.Collector {
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
 
-		var Repo Repository__
+		//var Repo Repository__
 		if err := json.Unmarshal([]byte(r.Body), &Repo); err != nil {
 			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
 			fmt.Println(err)
@@ -96,8 +97,9 @@ func GetRepoMetadataCollector() *colly.Collector {
 	return c
 }
 
-// GetRepoTagsCollector 为爬取指定Repository的Tag list的Collector绑定回调函数
-func GetRepoTagsCollector() *colly.Collector {
+// GetRepoTagsCollector 为爬取指定Repository的Tag list的Collector绑定回调函数。
+// 测试通过！！！
+func GetRepoTagsCollector(TagRec TagReceiver__) *colly.Collector {
 	c := GetDockerHubCollector()
 
 	// 爬Tag不需要考虑keep-alive
@@ -107,7 +109,7 @@ func GetRepoTagsCollector() *colly.Collector {
 
 	// 绑定回调函数
 	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("FROM RepoTagsCollector-----------------------Requesting")
+		fmt.Println("FROM RepoTagsCollector-----------------------Request")
 		fmt.Println("Visiting: ", r.URL)
 		// 查看request时使用的proxy
 		fmt.Println("Proxy: ", r.ProxyURL)
@@ -121,6 +123,49 @@ func GetRepoTagsCollector() *colly.Collector {
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
 
+		//var TagRec TagReceiver__
+		if err := json.Unmarshal([]byte(r.Body), &TagRec); err != nil {
+			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
+			fmt.Println(err)
+		}
+		fmt.Println(TagRec)
+	})
+
+	return c
+}
+
+// GetImageHistoryCollector 为爬取指定Namespace/Repository:tag Image的构建命令的Collector绑定回调函数。
+// 测试成功！！！
+func GetImageHistoryCollector(Arch []Arch__) *colly.Collector {
+	c := GetDockerHubCollector()
+
+	// 爬Tag不需要考虑keep-alive
+	c.WithTransport(&http.Transport{
+		DisableKeepAlives: true,
+	})
+
+	// 绑定回调函数
+	c.OnRequest(func(r *colly.Request) {
+		fmt.Println("FROM ImageHistoryCollector-----------------------Request")
+		fmt.Println("Visiting: ", r.URL)
+		// 查看request时使用的proxy
+		fmt.Println("Proxy: ", r.ProxyURL)
+		// 查看Cookie，如果有要清除，否则容易封号
+		fmt.Println("Cookie: ", r.Headers.Get("Cookie"))
+	})
+
+	// 处理JSON
+	c.OnResponse(func(r *colly.Response) {
+		fmt.Println("FROM ImageHistoryCollector-----------------------Response")
+		fmt.Println("From: ", r.Request.URL)
+		fmt.Println("Status Code", r.StatusCode)
+
+		//var TagRec TagReceiver__
+		if err := json.Unmarshal([]byte(r.Body), &Arch); err != nil {
+			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
+			fmt.Println(err)
+		}
+		fmt.Println(Arch)
 	})
 
 	return c

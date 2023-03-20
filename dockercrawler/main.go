@@ -20,8 +20,15 @@ func main() {
 	//	fmt.Println(r)
 	//}
 
-	c := crawler.GetRepoMetadataCollector()
-	c.Visit(crawler.GetRepoMetaURL("aa281916", "getting-started"))
+	//var Repo crawler.Repository__
+	//c := crawler.GetRepoMetadataCollector(Repo)
+	//c.Visit(crawler.GetRepoMetaURL("library", "mongo"))
+	//var TagR crawler.TagReceiver__
+	//c2 := crawler.GetRepoTagsCollector(TagR)
+	//c2.Visit(crawler.GetRepoTagsURL("library", "mongo", "1", "10"))
+	var Tag crawler.Tag__
+	c3 := crawler.GetImageHistoryCollector(Tag.Archs)
+	c3.Visit(crawler.GetImageHistoryURL("library", "mongo", "latest"))
 
 	//fmt.Println(crawler.GetNamespaceURL("aa281916", "1", "4"))
 	//fmt.Println(crawler.GetRepoMetaURL("aa281916", "getting-started"))

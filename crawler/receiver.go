@@ -40,7 +40,7 @@ type Repository__ struct {
 	PullCount       int      `json:"pull_count"`
 	LastUpdated     string   `json:"last_updated"`
 	DateRegistered  string   `json:"date_registered"`
-	FullDescription string   `json:"full_description"`
+	FullDescription string   `json:"full_description,omitempty"`
 	MediaTypes      []string `json:"media_types"`
 	ContentTypes    []string `json:"content_types"`
 	Tags            []Tag__  // 不从collector中unmarshal进来，而是后续append进来
@@ -65,12 +65,15 @@ type Tag__ struct {
 	TagLastPushed       string `json:"tag_last_pushed"`
 	MediaType           string `json:"media_type"`
 	ContentType         string `json:"content_type"`
+	Digest              string `json:"digest"`
 	Archs               []Arch__
 }
 
 // Arch__ 是一个namespace/repo:tag在特定架构下的镜像信息
 type Arch__ struct {
 	Architecture string    `json:"architecture"`
+	Features     string    `json:"features"`
+	Variant      string    `json:"variant"`
 	Digest       string    `json:"digest"`
 	Layers       []Layer__ `json:"layers"`
 	OS           string    `json:"os"`
