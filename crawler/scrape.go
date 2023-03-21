@@ -13,7 +13,7 @@ func ScrapeDockerHubRecursive() {
 
 }
 
-// ScrapeRegRepoListRecursive 在已经确定source下q=keyword时，匹配条目数count<9500时，
+// ScrapeRegRepoListRecursive 在已经确定source下q=keyword时，匹配条目数count<9000时，
 // 递归遍历该关键字的repo结果，拿到全部的repo名。
 func ScrapeRegRepoListRecursive(keyword, source string, chRegRepoList chan RegisterRepoList__) {
 	c := GetRegRepoListCollector(chRegRepoList)
@@ -25,8 +25,8 @@ func ScrapeRegRepoListRecursive(keyword, source string, chRegRepoList chan Regis
 	close(chRegRepoList)
 }
 
-// ScrapeRepoInfo 用于爬取指定repo的metadata和全部tag的信息。
-// 考虑在内部进一步将metadata和tag持久化。
+// ScrapeRepoInfo 用于爬取指定repo的metadata，全部tag，以及每个tag对应镜像的history信息。
+// 考虑在内部进一步将metadata和tag信息持久化。
 func ScrapeRepoInfo(namespace, repo string) {
 	// 思路1-------------------------
 	// 建立有效管道每阶段都在传数据

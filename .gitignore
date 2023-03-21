@@ -2,3 +2,4 @@
 .idea/
 go.work
 go.work.sum
+crawler/proxyaddr.json

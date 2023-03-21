@@ -42,8 +42,8 @@ func main() {
 	//for _, i := range []string{"1"} {
 	//	c.Visit(strings.Replace(RegURLTemplate, "{PAGE}", i, 1))
 	//}
-
-	fmt.Println(crawler.GenerateNextKeyword("____", true))
+	c := crawler.GetDockerHubCollector()
+	fmt.Println(c)
 
 	go func() { time.Sleep(time.Second * 3); done <- struct{}{} }()
 	// 退出程序

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gocolly/colly"
+	"github.com/gocolly/colly/proxy"
 	"net/http"
+	"os"
 )
 
 // GetDockerHubCollector 用于配置一个适用于Docker Hub的colly.Collector父版
@@ -14,20 +16,26 @@ func GetDockerHubCollector() *colly.Collector {
 		colly.AllowedDomains("hub.docker.com"),
 	)
 
+	// 配置Collector
 	// 关keep-alive
 	c.WithTransport(&http.Transport{
 		DisableKeepAlives: true,
 	})
 
-	// 配置Collector
 	// 配置代理池
-	//if p, err := proxy.RoundRobinProxySwitcher(
-	//	"https://127.0.0.1:8080",
-	//	"https://127.0.0.1:8081",
-	//	"https://127.0.0.1:8082",
-	//); err == nil {
-	//	c.SetProxyFunc(p)
-	//}
+	ps, _ := os.ReadFile("crawler/proxyaddr.json")
+	var Proxies struct {
+		Addresses []string `json:"proxies"`
+	}
+	if err := json.Unmarshal(ps, &Proxies); err != nil {
+		fmt.Println("[ERROR] Json unmarshal failed while parsing proxyaddr file.")
+	}
+	fmt.Println(Proxies)
+	if p, err := proxy.RoundRobinProxySwitcher(
+		Proxies.Addresses...,
+	); err == nil {
+		c.SetProxyFunc(p)
+	}
 
 	return c
 }
