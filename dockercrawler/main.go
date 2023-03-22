@@ -55,7 +55,6 @@ func main() {
 	//	}(i)
 	//}
 	//wg.Wait()
-
 	//go func() { time.Sleep(time.Second * 3); done <- struct{}{} }()
 	//// 退出程序
 	//<-done

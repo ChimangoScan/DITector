@@ -4,13 +4,18 @@ import "fmt"
 
 // 负责整个爬虫的核心调度，启动goroutine等。
 
-// 定义一系列控制goroutine数量的通道
-
+// 用于限制goroutine数量
 var (
-	// ChanLimitRepoListScraper 限制核心调度器goroutine数量，即并发ScrapeRegRepoListRecursive的数量
-	ChanLimitRepoListScraper = make(chan struct{}, 1)
-	// ChanLimitRepoInfoScraper 限制
-	ChanLimitRepoInfoScraper = make(chan struct{}, 1)
+	// ChanLimitMainGoroutine 限制核心调度器goroutine数量
+	ChanLimitMainGoroutine chan struct{}
+)
+
+// 用于等待
+
+// 定义一系列用于任务调度的关键字
+var (
+	ChanKeyword     chan string
+	ChanRegRepoList chan RegisterRepoList__
 )
 
 // CrawlDockerHubStaged 划分阶段进行整个DockerHub的爬取。
@@ -20,6 +25,11 @@ func CrawlDockerHubStaged() {
 	// Stage2 根据可用关键字爬取keyword->Repo List，发现全部Repo Name
 	// Stage3 根据Repo Name爬取Repo的全部Tags
 	// Stage4(可并入Stage3) 根据Tag爬取Tag对应的Arch History
+}
+
+// CoreScheduler 作为crawler运行时必须启动的goroutine，负责整个crawler内scraper的调度。
+func CoreScheduler() {
+	select {}
 }
 
 // DistributeKeywordToScrapeRegRepoList 负责具体将Repo count<9000的keyword分发给ScrapeRegRepoListRecursive。

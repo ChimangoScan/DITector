@@ -7,6 +7,7 @@ import (
 	"github.com/gocolly/colly/proxy"
 	"net/http"
 	"os"
+	"time"
 )
 
 // GetDockerHubCollector 用于配置一个适用于Docker Hub的colly.Collector父版
@@ -14,12 +15,18 @@ func GetDockerHubCollector() *colly.Collector {
 	// 创建新的Collector
 	c := colly.NewCollector(
 		colly.AllowedDomains("hub.docker.com"),
+		//colly.Async(true),
 	)
 
 	// 配置Collector
 	// 关keep-alive
 	c.WithTransport(&http.Transport{
 		DisableKeepAlives: true,
+	})
+
+	// 引入随机延时
+	c.Limit(&colly.LimitRule{
+		RandomDelay: 2 * time.Second,
 	})
 
 	// 配置代理池

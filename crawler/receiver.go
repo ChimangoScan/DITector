@@ -1,12 +1,6 @@
 package crawler
 
-// 用于实现json marshal和unmarshal的各个结构体
-
-// 初始化一系列接收器模板与通道
-
-var (
-	ChannelRegRepoList = make(chan RegisterRepoList__, 5)
-)
+// 用于用于json marshal和unmarshal的接收器模板
 
 // RegisterRepoList__ 收录爬到的repo list数量
 type RegisterRepoList__ struct {
