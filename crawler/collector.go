@@ -23,14 +23,14 @@ func GetDockerHubCollector() *colly.Collector {
 	})
 
 	// 配置代理池
-	ps, _ := os.ReadFile("crawler/proxyaddr.json")
+	ps, _ := os.ReadFile(ConfigCrawler.ProxyFile)
 	var Proxies struct {
 		Addresses []string `json:"proxies"`
 	}
 	if err := json.Unmarshal(ps, &Proxies); err != nil {
 		fmt.Println("[ERROR] Json unmarshal failed while parsing proxyaddr file.")
 	}
-	fmt.Println(Proxies)
+	//fmt.Println(Proxies)
 	if p, err := proxy.RoundRobinProxySwitcher(
 		Proxies.Addresses...,
 	); err == nil {

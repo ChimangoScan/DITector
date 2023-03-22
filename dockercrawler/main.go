@@ -1,11 +1,5 @@
 package main
 
-import (
-	"crawler"
-	"fmt"
-	"time"
-)
-
 // done 用于标识整个爬虫结束
 var done = make(chan struct{})
 
@@ -42,10 +36,27 @@ func main() {
 	//for _, i := range []string{"1"} {
 	//	c.Visit(strings.Replace(RegURLTemplate, "{PAGE}", i, 1))
 	//}
-	c := crawler.GetDockerHubCollector()
-	fmt.Println(c)
+	//c := crawler.GetDockerHubCollector()
+	//fmt.Println(c)
 
-	go func() { time.Sleep(time.Second * 3); done <- struct{}{} }()
-	// 退出程序
-	<-done
+	//sem := semaphore.NewWeighted(3)
+	//var wg sync.WaitGroup
+	//ctx := context.Background()
+	//for i := 0; i < 10; i++ {
+	//	sem.Acquire(ctx, 1)
+	//	wg.Add(1)
+	//	go func(j int) {
+	//		time.Sleep(3 * time.Second)
+	//		fmt.Println("From: ", j)
+	//		defer func() {
+	//			sem.Release(1)
+	//			wg.Done()
+	//		}()
+	//	}(i)
+	//}
+	//wg.Wait()
+
+	//go func() { time.Sleep(time.Second * 3); done <- struct{}{} }()
+	//// 退出程序
+	//<-done
 }

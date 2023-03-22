@@ -1,0 +1,4 @@
+{
+  "max_thread": 0,
+  "proxy_file": "crawler/proxyaddr.json"
+}
