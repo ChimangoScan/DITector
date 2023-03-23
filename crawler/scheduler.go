@@ -4,15 +4,16 @@ import "fmt"
 
 // 负责整个爬虫的核心调度，启动goroutine等。
 
+// 初始化一系列限制通道，通道初始化在config.go init()中实现
 // 用于限制goroutine数量
+
 var (
 	// ChanLimitMainGoroutine 限制核心调度器goroutine数量
 	ChanLimitMainGoroutine chan struct{}
 )
 
-// 用于等待
-
 // 定义一系列用于任务调度的关键字
+
 var (
 	ChanKeyword     chan string
 	ChanRegRepoList chan RegisterRepoList__

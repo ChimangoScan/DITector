@@ -13,8 +13,12 @@ func ScrapeDockerHubRecursive() {
 
 }
 
-// ScrapeRegRepoListRecursive 在已经确定source下q=keyword时，匹配条目数count<9000时，
-// 递归遍历该关键字的repo结果，拿到全部的repo名。
+// ScrapeRegRepoListRecursive 根据keyword返回结果进入不同的分支：
+//
+// count>=9000时，将GenerateNextKeyword(keyword, false)传入ChanKeyword，然后退出函数。
+//
+// count<9000时，将GenerateNextKeyword(keyword, true)传入ChanKeyword，同时递归爬取该keyword对应的全部RegisterRepoList__，
+// 传入ChanRegRepoList。
 func ScrapeRegRepoListRecursive(keyword, source string, chRegRepoList chan RegisterRepoList__) {
 	c := GetRegRepoListCollector(chRegRepoList)
 	for _, i := range []string{"1", "2", "3"} {
