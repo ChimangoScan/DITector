@@ -25,8 +25,12 @@ func init() {
 		fmt.Println("[ERROR] Json failed to unmarshal crawler/config.json with err: ", err)
 	}
 	// 默认情况下，允许启动的核心goroutine数为系统可调内核数
-	if ConfigCrawler.MaxThread == 0 {
+	if ConfigCrawler.MaxThread <= 0 {
+		runtime.GOMAXPROCS(runtime.NumCPU())
+		// runtime.GOMAXPROCS 返回的是设置成功之前的GOMAXPROCS，所以要再设一次获取上一次获取成功的数
 		ConfigCrawler.MaxThread = runtime.GOMAXPROCS(runtime.NumCPU())
+	} else {
+		runtime.GOMAXPROCS(ConfigCrawler.MaxThread)
 	}
 	// 初始化核心调度器的全局管道
 	ChanLimitMainGoroutine = make(chan struct{}, ConfigCrawler.MaxThread)

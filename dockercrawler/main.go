@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/gocolly/colly"
+	"strconv"
+	"sync"
 	"time"
 )
 
@@ -64,18 +67,29 @@ func main() {
 	//// 退出程序
 	//<-done
 
-	ch := make(chan int)
-	go func() {
-		for i := range ch {
-			fmt.Println(i)
-		}
-	}()
-
-	for i := 0; i < 10; i++ {
-		time.Sleep(time.Second)
-		ch <- i
+	c := colly.NewCollector()
+	fmt.Println(&c)
+	if err := c.Limit(&colly.LimitRule{
+		DomainGlob: "learnku.com",
+		Delay:      5 * time.Second,
+	}); err != nil {
+		fmt.Println(err)
 	}
-	close(ch)
+	c.OnRequest(func(request *colly.Request) {
+		fmt.Println("FROM: ", request.URL)
+	})
+	wg := sync.WaitGroup{}
+	for j := 0; j < 10; j++ {
+		wg.Add(1)
+		go func(j int) {
+			if err := c.Request("GET", "https://learnku.com/docs/the-way-to-go/106-method/"+strconv.Itoa(j), nil, nil, nil); err != nil {
+				fmt.Println(err)
+			}
+			wg.Done()
+		}(j)
+	}
+
+	wg.Wait()
 
 	time.Sleep(time.Second)
 }

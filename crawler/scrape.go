@@ -1,7 +1,10 @@
 package crawler
 
 import (
+	"fmt"
 	"github.com/gocolly/colly"
+	"strconv"
+	"sync"
 )
 
 // 实现一些统一的遍历爬取
@@ -22,30 +25,65 @@ func ScrapeDockerHubRecursive() {
 // count<9000时，将GenerateNextKeyword(keyword, true)传入ChanKeyword，同时递归爬取该keyword对应的全部RegisterRepoList__，
 // 传入ChanRegRepoList。
 func ScrapeRegRepoListRecursive(keyword, source string) {
-	// 启动一个专门处理chRegRepoList的函数，用来判断是否应在第一轮退出程序
+	var (
+		pages int
+		stop  bool
+	)
+	// 启动一个专门处理chRegRepoList的函数，用于
 	chRegRepoList := make(chan RegisterRepoList__)
-	go func(chRegRepoList chan RegisterRepoList__) {
-		for rrl := range chRegRepoList {
-			// Count过大，退出
-			if rrl.Count > 9000 {
-				// 一定是函数主体都处理好才向ChanKeyword中传数据，因为ChanKeyword是无缓冲通道，在核心调度器会阻塞。
-				ChanKeyword <- GenerateNextKeyword(keyword, false)
+	go func(ch chan RegisterRepoList__) {
+		for rrl := range ch {
+			// pages为0，代表i为1，即当前结果为当前keyword的第一次爬取结果
+			if pages == 0 {
+				cnt := rrl.Count
+				// Count过大，退出
+				if cnt > 9000 {
+					fmt.Println("[INFO] Count > 9000 for keyword: ", keyword)
+					stop = true
+				} else {
+					if (cnt % 100) != 0 {
+						pages = rrl.Count/100 + 1
+					} else {
+						pages = rrl.Count / 100
+					}
+					ChanRegRepoList <- rrl
+				}
 			} else {
+				// pages不为0，只负责转发
 				ChanRegRepoList <- rrl
 			}
+
 		}
 	}(chRegRepoList)
 
-	// page_size=100情况下，一般会有很多页，所以可以新建一个
 	c := GetRegRepoListCollector(chRegRepoList)
+	// 第一页爬取主动进行
+	i := 1
+	c.Visit(GetRegURL(keyword, source, strconv.Itoa(i), "100"))
 
-	for _, i := range []string{"1", "2", "3"} {
-		if err := c.Visit(GetRegURL(keyword, source, i, "4")); err != nil {
-			continue
-		}
+	// Count>9000，在核心调度器消费掉下一个keyword后退出。
+	if stop {
+		fmt.Println("[INFO] Count > 9000, Stop ScrapeRegRepoListRecursive for keyword: ", keyword)
+		close(chRegRepoList)
+		ChanKeyword <- GenerateNextKeyword(keyword, false)
+		return
 	}
 
+	// 待测试，这样的话collector中的时延是否还有效，如果有效将形成相对高效的流水线
+	wg := sync.WaitGroup{}
+	for i = 2; i <= pages; i++ {
+		wg.Add(1)
+		go func(j int) {
+			c.Visit(GetRegURL(keyword, source, strconv.Itoa(j), "100"))
+			wg.Done()
+		}(i)
+	}
+
+	wg.Wait()
+
 	close(chRegRepoList)
+
+	// 一定是函数主体都处理好才向ChanKeyword中传数据，因为ChanKeyword是无缓冲通道，在核心调度器会阻塞。
 	ChanKeyword <- GenerateNextKeyword(keyword, true)
 }
 

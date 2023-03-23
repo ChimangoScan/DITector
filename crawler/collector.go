@@ -29,6 +29,7 @@ func GetDockerHubCollector() *colly.Collector {
 	})
 
 	// 配置代理池
+	// To be done: 打乱顺序将Proxies.Addresses传入RoundRobinProxySwitcher作为代理池
 	//fmt.Println(Proxies)
 	if p, err := proxy.RoundRobinProxySwitcher(
 		Proxies.Addresses...,
@@ -42,7 +43,7 @@ func GetDockerHubCollector() *colly.Collector {
 // GetRegRepoListCollector 为爬取指定Register的Repo list的Collector绑定回调函数。
 // 爬取顺利的情况下，向chRegRepoList通道中传入爬到的RegisterRepoList__结果。
 // 测试通过！！！
-func GetRegRepoListCollector(chRegRepoList chan RegisterRepoList__) *colly.Collector {
+func GetRegRepoListCollector(ch chan RegisterRepoList__) *colly.Collector {
 	c := GetDockerHubCollector()
 
 	// 绑定回调函数
@@ -66,7 +67,7 @@ func GetRegRepoListCollector(chRegRepoList chan RegisterRepoList__) *colly.Colle
 			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
 			fmt.Println(err)
 		}
-		chRegRepoList <- RegRepoList
+		ch <- RegRepoList
 	})
 
 	return c

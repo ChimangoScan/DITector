@@ -2,7 +2,7 @@ package crawler
 
 // 用于用于json marshal和unmarshal的接收器模板
 
-// RegisterRepoList__ 收录爬到的repo list数量
+// RegisterRepoList__ 收录单次返回的repo list（信封）
 type RegisterRepoList__ struct {
 	PageSize  int       `json:"page_size"`
 	Next      string    `json:"next"`     // 记录下一页
