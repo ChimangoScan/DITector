@@ -76,7 +76,7 @@ func GetRegRepoListCollector(ch chan RegisterRepoList__) *colly.Collector {
 
 // GetRepoMetadataCollector 为爬取指定Repository的Tag list的Collector绑定回调函数。
 // 测试通过！！！
-func GetRepoMetadataCollector(Repo Repository__) *colly.Collector {
+func GetRepoMetadataCollector(Repo *Repository__) *colly.Collector {
 	c := GetDockerHubCollector()
 
 	// 绑定回调函数
@@ -108,7 +108,7 @@ func GetRepoMetadataCollector(Repo Repository__) *colly.Collector {
 
 // GetRepoTagsCollector 为爬取指定Repository的Tag list的Collector绑定回调函数。
 // 测试通过！！！
-func GetRepoTagsCollector(TagRec *TagReceiver__) *colly.Collector {
+func GetRepoTagsCollector(ch chan TagReceiver__) *colly.Collector {
 	c := GetDockerHubCollector()
 
 	// 爬Tag不需要考虑keep-alive
@@ -132,11 +132,12 @@ func GetRepoTagsCollector(TagRec *TagReceiver__) *colly.Collector {
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
 
-		//var TagRec TagReceiver__
+		var TagRec TagReceiver__
 		if err := json.Unmarshal([]byte(r.Body), &TagRec); err != nil {
 			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
 			fmt.Println(err)
 		}
+		ch <- TagRec
 		//fmt.Println(TagRec)
 	})
 
