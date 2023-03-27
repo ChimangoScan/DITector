@@ -55,7 +55,6 @@ func GetDockerHubAsyncCollector() *colly.Collector {
 
 // GetRegRepoListCollector 为爬取指定Register的Repo list的Collector绑定回调函数。
 // 爬取顺利的情况下，向chRegRepoList通道中传入爬到的RegisterRepoList__结果。
-// 测试通过！！！
 func GetRegRepoListCollector(ch chan RegisterRepoList__) *colly.Collector {
 	c := GetDockerHubAsyncCollector()
 
@@ -88,7 +87,6 @@ func GetRegRepoListCollector(ch chan RegisterRepoList__) *colly.Collector {
 }
 
 // GetRepoMetadataCollector 为爬取指定Repository的Tag list的Collector绑定回调函数。
-// 测试通过！！！
 func GetRepoMetadataCollector(repo *Repository__) *colly.Collector {
 	c := GetDockerHubCollector()
 
@@ -113,14 +111,12 @@ func GetRepoMetadataCollector(repo *Repository__) *colly.Collector {
 			fmt.Println("[ERROR] Occurred While Doing json.Unmarshal() Response From ", r.Request.URL)
 			fmt.Println(err)
 		}
-		fmt.Println(repo)
 	})
 
 	return c
 }
 
 // GetRepoTagsCollector 为爬取指定Repository的Tag list的Collector绑定回调函数。
-// 测试通过！！！
 func GetRepoTagsCollector(ch chan TagReceiver__) *colly.Collector {
 	// Tags有很强的时间顺序需求，不用Async Collector
 	c := GetDockerHubCollector()
@@ -154,7 +150,6 @@ func GetRepoTagsCollector(ch chan TagReceiver__) *colly.Collector {
 }
 
 // GetImageHistoryCollector 为爬取指定Namespace/Repository:tag Image的构建命令的Collector绑定回调函数。
-// 测试成功！！！
 func GetImageHistoryCollector(Arch *[]Arch__) *colly.Collector {
 	c := GetDockerHubCollector()
 

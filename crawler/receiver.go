@@ -1,5 +1,9 @@
 package crawler
 
+import (
+	"fmt"
+)
+
 // 用于用于json marshal和unmarshal的接收器模板
 
 // RegisterRepoList__ 收录单次返回的repo list（信封）
@@ -81,4 +85,71 @@ type Layer__ struct {
 	Digest      string `json:"digest,omitempty"`
 	Size        int    `json:"size"`
 	Instruction string `json:"instruction"`
+}
+
+func (r Repository__) String() string {
+	return fmt.Sprintf(
+		`User: %s
+Name: %s
+Namespace: %s
+RepositoryType: %s
+Description: %s
+IsPrivate: %v
+IsAutomated: %v
+CanEdit: %v
+StarCount: %d
+PullCount: %d
+LastUpdated: %s
+DateRegistered: %s
+FullDescription: %s
+MediaTypes: %v
+ContentTypes: %v
+Tags: %v`,
+		r.User, r.Name, r.Namespace, r.RepositoryType,
+		r.Description, r.IsPrivate, r.IsAutomated, r.CanEdit,
+		r.StarCount, r.PullCount, r.LastUpdated, r.DateRegistered,
+		r.FullDescription, r.MediaTypes, r.ContentTypes, r.Tags,
+	)
+}
+
+func (t Tag__) String() string {
+	return fmt.Sprintf(
+		`Name: %s
+	LastUpdated: %s
+	LastUpdaterUsername: %s
+	TagLastPulled: %s
+	TagLastPushed: %s
+	MediaType: %s
+	ContentType: %s
+	Digest: %s
+	Archs: %v`,
+		t.Name, t.LastUpdated, t.LastUpdaterUsername, t.TagLastPulled,
+		t.TagLastPushed, t.MediaType, t.ContentType, t.Digest, t.Archs,
+	)
+}
+
+func (a Arch__) String() string {
+	return fmt.Sprintf(
+		`Architecture: %s
+		Features: %s
+		Variant: %s
+		Digest: %s
+		Layers: %v
+		OS: %s
+		Size: %d
+		Status: %s
+		LastPulled: %s
+		LastPushed: %s`,
+		a.Architecture, a.Features, a.Variant, a.Digest, a.Layers,
+		a.OS, a.Size, a.Status, a.LastPulled, a.LastPushed,
+	)
+}
+
+func (l Layer__) String() string {
+	return fmt.Sprintf(
+		`Digest: %s
+			Size: %d
+			Instruction: %s`,
+		l.Digest, l.Size, l.Instruction,
+	)
 }
