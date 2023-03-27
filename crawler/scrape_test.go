@@ -39,3 +39,8 @@ func TestScrapeRegRepoListRecursive(t *testing.T) {
 
 	time.Sleep(time.Second)
 }
+
+func TestScrapeRepoInfo(t *testing.T) {
+	//ScrapeRepoInfo("xmrig2021", "r2021")
+	ScrapeRepoInfo("patsissons", "xmrig")
+}

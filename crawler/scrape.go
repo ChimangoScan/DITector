@@ -111,7 +111,7 @@ func ScrapeRepoInfo(namespace, repository string) {
 	chTags := make(chan TagReceiver__)
 	ct := GetRepoTagsCollector(chTags)
 	var (
-		i        = 1
+		cur      = 1
 		pages    int
 		pageLock sync.Mutex
 	)
@@ -137,19 +137,38 @@ func ScrapeRepoInfo(namespace, repository string) {
 		}
 	}(chTags)
 	// 访问第一页
-	ct.Visit(GetRepoTagsURL(namespace, repository, strconv.Itoa(i), "100"))
+	ct.Visit(GetRepoTagsURL(namespace, repository, strconv.Itoa(cur), "100"))
 
 	// 尝试获取锁，获取的一瞬间就可以关闭锁，做一次pages的同步
 	pageLock.Lock()
 	pageLock.Unlock()
 
-	if pages > 0 {
-		for i = 2; i <= pages; i++ {
-			ct.Visit(GetRepoTagsURL(namespace, repository, strconv.Itoa(i), "100"))
-		}
+	// 获取全部tags
+	for cur = 2; cur <= pages; cur++ {
+		ct.Visit(GetRepoTagsURL(namespace, repository, strconv.Itoa(cur), "100"))
 	}
+	// 获取后关闭通道
+	close(chTags)
 
 	// 爬每个Tag的所有Arch History
+	limit := make(chan struct{}, 10)
+	wg := sync.WaitGroup{}
+	for i, _ := range repo.Tags {
+		limit <- struct{}{}
+		wg.Add(1)
+		go func(i int) {
+			defer func() {
+				wg.Done()
+				<-limit
+			}()
+			ca := GetImageHistoryCollector(&repo.Tags[i].Archs)
+			ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name))
+		}(i)
+	}
+	wg.Wait()
+
+	// 爬取结束，做存储工作
+	fmt.Println(repo)
 }
 
 // ScrapeRepoMetadata 用于爬取指定repo的metadata，返回一个。

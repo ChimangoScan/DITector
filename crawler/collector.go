@@ -105,6 +105,7 @@ func GetRepoMetadataCollector(repo *Repository__) *colly.Collector {
 		fmt.Println("FROM RepoMetadataCollector-----------------------Response")
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
+		fmt.Println("X-Ratelimit-Remaining: ", r.Headers.Get("X-Ratelimit-Remaining"))
 
 		//var Repo Repository__
 		if err := json.Unmarshal([]byte(r.Body), &repo); err != nil {
@@ -136,6 +137,7 @@ func GetRepoTagsCollector(ch chan TagReceiver__) *colly.Collector {
 		fmt.Println("FROM RepoTagsCollector-----------------------Response")
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
+		fmt.Println("X-Ratelimit-Remaining: ", r.Headers.Get("X-Ratelimit-Remaining"))
 
 		var TagRec TagReceiver__
 		if err := json.Unmarshal([]byte(r.Body), &TagRec); err != nil {
@@ -168,6 +170,7 @@ func GetImageHistoryCollector(Arch *[]Arch__) *colly.Collector {
 		fmt.Println("FROM ImageHistoryCollector-----------------------Response")
 		fmt.Println("From: ", r.Request.URL)
 		fmt.Println("Status Code", r.StatusCode)
+		fmt.Println("X-Ratelimit-Remaining: ", r.Headers.Get("X-Ratelimit-Remaining"))
 
 		//var TagRec TagReceiver__
 		if err := json.Unmarshal([]byte(r.Body), &Arch); err != nil {
