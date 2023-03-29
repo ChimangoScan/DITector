@@ -34,6 +34,11 @@ crawler/ \
 
 在`crawler/config.go`文件中，定义了crawler的初始化函数，默认情况下调用`runtime.GOMAXPROCS(runtime.NumCPU())`设置最大线程为cpu数。
 
+一个对象的多页问题使用`colly.Async`异步爬取，用通道传递每页的返回结果。
+具体是在主goroutine内创建一个chan，启一个调度器处理接收到的内容，主要是对于第一页内容根据Count计算页数，后续就是转发。
+
+`colly.Async`就是内部的`WaitGroup.Add`，然后新起一个goroutine。所有异步请求创建好后别忘了调c.Wait。
+
 具体调度见系统架构图
 
 **代理池中的某个IP可能因为短时间访问次数过多被ban**
