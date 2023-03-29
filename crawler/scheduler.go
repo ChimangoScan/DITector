@@ -16,9 +16,22 @@ var (
 
 var (
 	// chanKeyword 用于传递keyword，优先爬完有关一个keyword的所有镜像，再进入下一个keyword。
-	chanKeyword     = make(chan string)
+	chanKeyword = make(chan string)
+	// chanRegRepoList 用于传递拿到的仓库信封，方便核心调度器解开信封处理每个信封内容
 	chanRegRepoList chan RegisterRepoList__
+	// chanDone 用于传递DockerCrawler结束信号，即keyword为""时
+	chanDone = make(chan struct{})
 )
+
+// Start 是整个DockerCrawler的入口函数
+func Start() {
+	// 启动核心调度器
+	go CoreScheduler()
+	// 传入初始Keyword
+	// ToDO: cur读取进度而不是每次从"00"开始
+	cur := "00"
+	chanKeyword <- cur
+}
 
 // CrawlDockerHubStaged 划分阶段进行整个DockerHub的爬取。
 // 未必进行实现，在实际实现中仍考虑任务分发全过程并发，而非分阶段在阶段内并发。
@@ -36,10 +49,7 @@ func CrawlDockerHubStaged() {
 // 将keyword分发给ScrapeRegRepoListRecursive，生成下一个keyword，爬取当前keyword的仓库列表。
 //
 // 将regrepolist分发给ScrapeRepoInfo，爬取仓库metadata，爬取仓库所有tag的所有arch history。
-func CoreScheduler(initKw string) {
-	go func() {
-		chanKeyword <- initKw
-	}()
+func CoreScheduler() {
 	for {
 		select {
 		// 获取到新的keyword，将其传入ScrapeRegRepoListRecursive尝试
@@ -58,14 +68,10 @@ func CoreScheduler(initKw string) {
 					ScrapeRepoInfo(s.Name, s.Source)
 				}
 			}(rrl)
+		case <-chanDone:
+			fmt.Println("[+] All Done")
+			fmt.Println("[+] DockerCrawler Exit")
+			return
 		}
-	}
-}
-
-// DistributeKeywordToScrapeRegRepoList 负责具体将Repo count<9000的keyword分发给ScrapeRegRepoListRecursive。
-func DistributeKeywordToScrapeRegRepoList(kc chan string) {
-	for k := range kc {
-		// 尝试拿到
-		fmt.Println(k)
 	}
 }

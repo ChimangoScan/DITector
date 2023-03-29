@@ -97,7 +97,15 @@ func ScrapeRegRepoListRecursive(keyword, source string) {
 	close(ch)
 
 	// 一定是函数主体都处理好才向ChanKeyword中传数据，因为ChanKeyword是无缓冲通道，在核心调度器会阻塞。
-	chanKeyword <- GenerateNextKeyword(keyword, true)
+	nxt := GenerateNextKeyword(keyword, true)
+	if nxt == "" {
+		// DockerCrawler结束信号
+		chanDone <- struct{}{}
+	} else {
+		// ToDo: 把当前keyword、nxt保存到进度中
+
+		chanKeyword <- nxt
+	}
 }
 
 // ScrapeRepoInfo 用于爬取仓库namespace/repository的metadata，全部tag，以及每个tag对应镜像的history信息。
@@ -153,6 +161,7 @@ func ScrapeRepoInfo(namespace, repository string) {
 	close(chTags)
 
 	// 爬每个Tag的所有Arch History
+	// ToDo: 根据是否包含Proxy判断应该使用并发还是延迟
 	// 并发导致随机延时只能短暂延缓达到Rate-Limit的速度
 	//limit := make(chan struct{}, 5)
 	//wg := sync.WaitGroup{}
@@ -177,7 +186,7 @@ func ScrapeRepoInfo(namespace, repository string) {
 	// Test显示71个tag用时142s
 	for i, _ := range repo.Tags {
 		// 引入随机延时，防止快速达到限制
-		rd := time.Duration(rand.Int63n(int64(2 * time.Second)))
+		rd := time.Duration(rand.Int63n(int64(5 * time.Second)))
 		time.Sleep(rd)
 		ca := GetImageHistoryCollector(&repo.Tags[i].Archs)
 		ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name))

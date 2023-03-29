@@ -22,6 +22,7 @@ var Proxies struct {
 }
 
 func init() {
+	// 加载DockerCrawler Config
 	fb, err := os.ReadFile(ConfigFile)
 	if err != nil {
 		fmt.Println("[ERROR] Failed to load ", ConfigFile)
@@ -43,6 +44,7 @@ func init() {
 	// 初始化核心调度器的全局管道
 	chanLimitMainGoroutine = make(chan struct{}, ConfigCrawler.MaxThread)
 	chanRegRepoList = make(chan RegisterRepoList__, ConfigCrawler.MaxThread)
+
 	// 初始化go colly Proxies
 	if ConfigCrawler.LocalProxy {
 		ps, _ := os.ReadFile(ConfigCrawler.ProxyFile)
