@@ -71,9 +71,7 @@ CREATE TABLE IF NOT EXISTS repository
 	last_updated TIMESTAMP,
 	date_registered TIMESTAMP,
 	full_description LONGTEXT,
-	media_types TEXT,
-	content_types TINYTEXT,
-	PRIMARY KEY (user,name)
+	PRIMARY KEY (namespace,name)
 );`
 	_, err = db2.Exec(createRepository)
 	if err != nil {
@@ -82,4 +80,65 @@ CREATE TABLE IF NOT EXISTS repository
 		fmt.Println("CREATE TABLE repository success.")
 	}
 
+	// 创建tags表
+	createTags := `
+CREATE TABLE IF NOT EXISTS tags
+(
+    namespace VARCHAR(255),
+    repository VARCHAR(255),
+    name VARCHAR(255) NOT NULL,
+    last_updated TIMESTAMP,
+    last_updater_username VARCHAR(255),
+    tag_last_pulled TIMESTAMP,
+    tag_last_pushed TIMESTAMP,
+    media_type TINYTEXT,
+    content_type TINYTEXT,
+    FOREIGN KEY (namespace,repository) REFERENCES repository(namespace,name)
+);`
+	_, err = db2.Exec(createTags)
+	if err != nil {
+		log.Fatalln("[ERROR] CREATE TABLE tags failed with err: ", err)
+	} else {
+		fmt.Println("CREATE TABLE tags success.")
+	}
+
+	// 创建images表，真正对应到image上，包含层信息，来自Arch__
+	createImages := `
+CREATE TABLE IF NOT EXISTS images
+(
+    namespace VARCHAR(255),
+    repository VARCHAR(255),
+    tag VARCHAR(255) NOT NULL ,
+    architecture TINYTEXT,
+    features TINYTEXT,
+    variant TINYTEXT,
+    digest CHAR(64) NOT NULL,
+    os TINYTEXT,
+    size BIGINT,
+    status VARCHAR(8),
+    last_pulled TIMESTAMP,
+    last_pushed TIMESTAMP,
+    FOREIGN KEY (namespace,repository) REFERENCES repository(namespace,name)
+);`
+	_, err = db2.Exec(createImages)
+	if err != nil {
+		log.Fatalln("[ERROR] CREATE TABLE images failed with err: ", err)
+	} else {
+		fmt.Println("CREATE TABLE images success.")
+	}
+
+	// 创建layers表
+	createLayers := `
+CREATE TABLE IF NOT EXISTS layers
+(
+    digest CHAR(64) PRIMARY KEY,
+    size INT,
+    instruction TEXT
+);`
+	_, err = db2.Exec(createLayers)
+	if err != nil {
+		log.Fatalln("[ERROR] CREATE TABLE layers failed with err: ", err)
+	} else {
+		fmt.Println("CREATE TABLE layers success.")
+	}
 }

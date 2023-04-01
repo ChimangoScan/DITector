@@ -26,21 +26,21 @@ type NamespaceRepoList__ struct {
 }
 
 type Repository__ struct {
-	User            string   `json:"user"`
-	Name            string   `json:"name"`
-	Namespace       string   `json:"namespace"`
-	RepositoryType  string   `json:"repository_type"`
-	Description     string   `json:"description"`
-	IsPrivate       bool     `json:"is_private"`
-	IsAutomated     bool     `json:"is_automated"`
-	StarCount       int      `json:"star_count"`
-	PullCount       int64    `json:"pull_count"`
-	LastUpdated     string   `json:"last_updated"`
-	DateRegistered  string   `json:"date_registered"`
-	FullDescription string   `json:"full_description,omitempty"`
-	MediaTypes      []string `json:"media_types"`
-	ContentTypes    []string `json:"content_types"`
-	Tags            []Tag__  // 不从collector中unmarshal进来，而是后续append进来
+	User            string `json:"user"`
+	Name            string `json:"name"`
+	Namespace       string `json:"namespace"`
+	RepositoryType  string `json:"repository_type"`
+	Description     string `json:"description"`
+	IsPrivate       bool   `json:"is_private"`
+	IsAutomated     bool   `json:"is_automated"`
+	StarCount       int    `json:"star_count"`
+	PullCount       int64  `json:"pull_count"`
+	LastUpdated     string `json:"last_updated"`
+	DateRegistered  string `json:"date_registered"`
+	FullDescription string `json:"full_description,omitempty"`
+	//MediaTypes      []string `json:"media_types"`
+	//ContentTypes    []string `json:"content_types"`
+	Tags []Tag__ // 不从collector中unmarshal进来，而是后续append进来
 }
 
 // TagReceiver__ 用于ScrapeRepoTagsRecursive，得到的Results要append到Repository__中。
@@ -62,8 +62,8 @@ type Tag__ struct {
 	TagLastPushed       string `json:"tag_last_pushed"`
 	MediaType           string `json:"media_type"`
 	ContentType         string `json:"content_type"`
-	Digest              string `json:"digest"`
-	Archs               []Arch__
+	//Digest              string `json:"digest"`
+	Archs []Arch__
 }
 
 // Arch__ 是一个namespace/repo:tag在特定架构下的镜像信息
@@ -74,7 +74,7 @@ type Arch__ struct {
 	Digest       string    `json:"digest"`
 	Layers       []Layer__ `json:"layers"`
 	OS           string    `json:"os"`
-	Size         int       `json:"size"`
+	Size         int64     `json:"size"`
 	Status       string    `json:"status"`
 	LastPulled   string    `json:"last_pulled"`
 	LastPushed   string    `json:"last_pushed"`
@@ -101,13 +101,11 @@ PullCount: %d
 LastUpdated: %s
 DateRegistered: %s
 FullDescription: %s
-MediaTypes: %v
-ContentTypes: %v
 Tags: %v`,
 		r.User, r.Name, r.Namespace, r.RepositoryType,
 		r.Description, r.IsPrivate, r.IsAutomated,
 		r.StarCount, r.PullCount, r.LastUpdated, r.DateRegistered,
-		r.FullDescription, r.MediaTypes, r.ContentTypes, r.Tags,
+		r.FullDescription, r.Tags,
 	)
 }
 
@@ -121,10 +119,9 @@ func (t Tag__) String() string {
 	TagLastPushed: %s
 	MediaType: %s
 	ContentType: %s
-	Digest: %s
 	Archs: %v`,
 		t.Name, t.LastUpdated, t.LastUpdaterUsername, t.TagLastPulled,
-		t.TagLastPushed, t.MediaType, t.ContentType, t.Digest, t.Archs,
+		t.TagLastPushed, t.MediaType, t.ContentType, t.Archs,
 	)
 }
 
