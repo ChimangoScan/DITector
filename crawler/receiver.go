@@ -33,9 +33,8 @@ type Repository__ struct {
 	Description     string   `json:"description"`
 	IsPrivate       bool     `json:"is_private"`
 	IsAutomated     bool     `json:"is_automated"`
-	CanEdit         bool     `json:"can_edit"`
 	StarCount       int      `json:"star_count"`
-	PullCount       int      `json:"pull_count"`
+	PullCount       int64    `json:"pull_count"`
 	LastUpdated     string   `json:"last_updated"`
 	DateRegistered  string   `json:"date_registered"`
 	FullDescription string   `json:"full_description,omitempty"`
@@ -97,7 +96,6 @@ RepositoryType: %s
 Description: %s
 IsPrivate: %v
 IsAutomated: %v
-CanEdit: %v
 StarCount: %d
 PullCount: %d
 LastUpdated: %s
@@ -107,7 +105,7 @@ MediaTypes: %v
 ContentTypes: %v
 Tags: %v`,
 		r.User, r.Name, r.Namespace, r.RepositoryType,
-		r.Description, r.IsPrivate, r.IsAutomated, r.CanEdit,
+		r.Description, r.IsPrivate, r.IsAutomated,
 		r.StarCount, r.PullCount, r.LastUpdated, r.DateRegistered,
 		r.FullDescription, r.MediaTypes, r.ContentTypes, r.Tags,
 	)

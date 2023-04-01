@@ -9,7 +9,7 @@ and the layers of each architecture of each tag, etc.
 
 ## Install
 
-需要的数据库环境
+配置mysql数据库环境，并为mysql数据库创建新用户docker，密码docker。
 
 ## Usage
 ### Basic Usage
