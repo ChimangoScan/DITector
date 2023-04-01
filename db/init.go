@@ -39,7 +39,7 @@ func init() {
 	defer db2.Close()
 	fmt.Println("Open DATABASE dockerhub Success.")
 	if err := db2.Ping(); err != nil {
-		log.Fatalln("[ERROR] Ping database dockerhub failed with err: ", err)
+		log.Fatalln("[ERROR] Ping DATABASE dockerhub failed with err: ", err)
 	}
 	fmt.Println("Ping database dockerhub Success.")
 
