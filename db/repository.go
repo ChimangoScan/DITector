@@ -28,9 +28,10 @@ func (d *DockerDB) InsertRepository__(r crawler.Repository__) (sql.Result, error
 		flag |= 1 << 1
 	}
 
-	return d.db.Exec(fmt.Sprintf(insertRepository,
-		r.User, r.Name, r.Namespace, r.RepositoryType, r.Description, flag,
+	insert := fmt.Sprintf(insertRepository,
+		r.User, r.Name, r.Namespace, r.RepositoryType, EscapeString(r.Description), flag,
 		r.StarCount, r.PullCount, r.LastUpdated[:19], r.DateRegistered[:19],
-		r.FullDescription),
-	)
+		EscapeString(r.FullDescription))
+
+	return d.db.Exec(insert)
 }

@@ -25,9 +25,3 @@ func (d *DockerDB) Ping() error {
 func (d *DockerDB) Close() error {
 	return d.db.Close()
 }
-
-// EscapeString
-// TODO: Escape string
-func EscapeString(s string) string {
-	return s
-}
