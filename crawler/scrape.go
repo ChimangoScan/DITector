@@ -106,6 +106,8 @@ func ScrapeRegRepoListRecursive(keyword, source string) {
 		_, err := dockerDB.InsertKeyword(keyword)
 		if err != nil {
 			fmt.Printf("[ERROR] Insert keyword '%s' into keywords failed with: %s\n", keyword, err)
+		} else {
+			fmt.Printf("Insert keyword '%s' success.\n", keyword)
 		}
 		chanKeyword <- nxt
 	}
@@ -217,25 +219,32 @@ func ScrapeRepoInfo(namespace, repository string) {
 		time.Sleep(rd)
 		ca := GetImageHistoryCollector(&repo.Tags[i].Archs)
 		ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name))
-
+		// 存储tag下每个arch的image信息
+		for j, _ := range repo.Tags[i].Archs {
+			res, err := StoreArch__(namespace, repository, repo.Tags[i].Name, &repo.Tags[i].Archs[j])
+			if err != nil {
+				fmt.Println("[ERROR] Insert into images failed with: ", err)
+			}
+			if k, _ := res.RowsAffected(); k == 0 {
+				fmt.Printf("[WARN] Image '%s' already exist, digest: %s\n",
+					namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+			} else {
+				fmt.Printf("Insert image '%s' success, digest: %s\n",
+					namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+			}
+		}
 	}
 
-	// 爬取结束，做存储工作
-	// 先存tags
-
-	fmt.Println(repo)
 }
 
-// ScrapeRepoMetadata 用于爬取指定repo的metadata，返回一个。
+// ScrapeRepoMetadata
+// TODO: 用于爬取指定repo的metadata，返回一个。
 func ScrapeRepoMetadata(namespace, repo string) {
 
 }
 
-// ScrapeRepoTagsRecursive 递归爬取指定Repo的全部Tag记录。
+// ScrapeRepoTagsRecursive
+// TODO: 递归爬取指定Repo的全部Tag记录。
 func ScrapeRepoTagsRecursive(c *colly.Collector, namespace, repo string) {
-	for _, i := range []string{"1"} {
-		if err := c.Visit(GetRepoTagsURL(namespace, repo, i, "100")); err != nil {
-			continue
-		}
-	}
+
 }
