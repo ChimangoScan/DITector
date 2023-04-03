@@ -115,6 +115,7 @@ func ScrapeRegRepoListRecursive(keyword, source string) {
 
 // ScrapeRepoInfo 用于爬取仓库namespace/repository的metadata，全部tag，以及每个tag对应镜像的history信息。
 // 考虑根据这里的结果进一步将metadata和tag信息持久化。
+// TODO: 完全重构，分发任务调整为单任务分发模式，方便快速处理err的网页
 func ScrapeRepoInfo(namespace, repository string) {
 	var repo Repository__
 

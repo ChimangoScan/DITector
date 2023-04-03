@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gocolly/colly"
 	"net/http"
+	"strconv"
 	"testing"
 )
 
@@ -19,9 +20,12 @@ func TestSetProxy(t *testing.T) {
 	//} else {
 	//	c.SetProxyFunc(p)
 	//}
-	if err := c.SetProxy("http://60.12.168.114:9002"); err != nil {
+	if err := c.SetProxy("http://49.86.179.155:8089"); err != nil {
 		fmt.Println("[ERROR] Set proxy failed with: ", err)
 	}
+	fmt.Println("Set proxy success: ", c)
+
+	//c.SetRequestTimeout(time.Second * 20)
 
 	// 绑定回调函数
 	c.OnRequest(func(r *colly.Request) {
@@ -54,11 +58,13 @@ func TestSetProxy(t *testing.T) {
 		fmt.Println("Tags count: ", tagr.Count)
 	})
 
-	testurl := GetRepoTagsURL("xmrig2021", "r2021", "1", "4")
+	testurl := GetRepoTagsURL("library", "mongo", "1", "4")
 
 	fmt.Println(testurl)
 
-	if err := c.Visit(testurl); err != nil {
-		fmt.Println("[ERROR] Colly visit failed with: ", err)
+	for i := 1; i < 10; i++ {
+		if err := c.Visit(GetRepoTagsURL("library", "mongo", strconv.Itoa(i), "4")); err != nil {
+			fmt.Println("[ERROR] Colly visit failed with: ", err)
+		}
 	}
 }
