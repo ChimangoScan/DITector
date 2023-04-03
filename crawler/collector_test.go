@@ -1,0 +1,64 @@
+package crawler
+
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/gocolly/colly"
+	"net/http"
+	"testing"
+)
+
+// TestSetProxy 测一下proxy配置能否生效
+func TestSetProxy(t *testing.T) {
+	c := GetDockerHubCollector()
+
+	//if p, err := proxy.RoundRobinProxySwitcher(
+	//	Proxies.Addresses...,
+	//); err != nil {
+	//	fmt.Println("[ERROR] collector SetProxy Failed with: ", err)
+	//} else {
+	//	c.SetProxyFunc(p)
+	//}
+	if err := c.SetProxy("http://60.12.168.114:9002"); err != nil {
+		fmt.Println("[ERROR] Set proxy failed with: ", err)
+	}
+
+	// 绑定回调函数
+	c.OnRequest(func(r *colly.Request) {
+		fmt.Println("FROM TestSetProxy-----------------------Request")
+		fmt.Println("Visiting: ", r.URL)
+		// 查看request时使用的proxy
+		fmt.Println("Proxy: ", r.ProxyURL)
+		fmt.Println("UserAgent: ", r.Headers.Get("User-Agent"))
+		// 查看Cookie，如果有要清除，否则容易封号
+		fmt.Println("Cookie: ", r.Headers.Get("Cookie"))
+	})
+
+	// 处理JSON
+	c.OnResponse(func(r *colly.Response) {
+		fmt.Println("FROM TestSetProxy-----------------------Response")
+		fmt.Println("From: ", r.Request.URL)
+		fmt.Println("Proxy: ", r.Request.ProxyURL)
+		fmt.Println("Status Code: ", r.StatusCode)
+		if r.StatusCode != http.StatusOK {
+			fmt.Println("[-] status not ok: ", r.StatusCode)
+		} else {
+			fmt.Println("[+] status ok")
+		}
+		fmt.Printf("X-Ratelimit-Remaining: %s, type: %T\n",
+			r.Headers.Get("X-Ratelimit-Remaining"),
+			r.Headers.Get("X-Ratelimit-Remaining"))
+
+		var tagr TagReceiver__
+		json.Unmarshal(r.Body, &tagr)
+		fmt.Println("Tags count: ", tagr.Count)
+	})
+
+	testurl := GetRepoTagsURL("xmrig2021", "r2021", "1", "4")
+
+	fmt.Println(testurl)
+
+	if err := c.Visit(testurl); err != nil {
+		fmt.Println("[ERROR] Colly visit failed with: ", err)
+	}
+}

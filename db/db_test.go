@@ -1,7 +1,6 @@
 package db
 
 import (
-	"crawler"
 	"fmt"
 	"testing"
 	"time"
@@ -74,16 +73,6 @@ func TestDockerDB_InsertRepository__(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	var r crawler.Repository__
-	c := crawler.GetRepoMetadataCollector(&r)
-	c.Visit(crawler.GetRepoMetaURL("patsissons", "xmrig"))
-
-	res, err := crawler.StoreRepository__(&r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fmt.Println(res.RowsAffected())
 }
 
 // TODO: Insert Test废了，因为db和crawler循环依赖了，懒得写测试用例了，在crawler那边测试吧

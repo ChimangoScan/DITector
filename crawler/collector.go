@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gocolly/colly"
+	"math/rand"
 	"net/http"
 	"time"
 )
@@ -12,7 +13,8 @@ import (
 func GetDockerHubCollector() *colly.Collector {
 	// 创建新的Collector
 	c := colly.NewCollector(
-		colly.AllowedDomains("hub.docker.com"),
+		//colly.AllowedDomains("hub.docker.com"),
+		colly.UserAgent(UserAgents[rand.Intn(len(UserAgents))]),
 	)
 
 	// 配置Collector
