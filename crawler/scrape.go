@@ -305,7 +305,6 @@ func ScrapeRepoInfo(namespace, repository string) {
 		//rd := time.Duration(rand.Int63n(int64(5 * time.Second)))
 		//time.Sleep(rd)
 		ca := GetImageHistoryCollector(&repo.Tags[i].Archs)
-		// TODO: 检查下适配
 		for err = ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name)); err != nil; err = ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name)) {
 			if errCnt == 0 {
 				if strings.Contains(err.Error(), "Not Found") {
@@ -323,21 +322,25 @@ func ScrapeRepoInfo(namespace, repository string) {
 				cm.SetProxy(GetHTTPSProxy())
 			}
 		}
+		// 爬取成功则将每个arch的image信息存储
+		if errCnt < 12 {
+			// 存储tag下每个arch的image信息
+			for j, _ := range repo.Tags[i].Archs {
+				res, errS := StoreArch__(namespace, repository, repo.Tags[i].Name, &repo.Tags[i].Archs[j])
+				if errS != nil {
+					fmt.Println("[ERROR] Insert into images failed with: ", errS)
+				}
+				if k, _ := res.RowsAffected(); k == 0 {
+					fmt.Printf("[WARN] Image '%s' already exist, digest: %s\n",
+						namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+				} else {
+					fmt.Printf("[INFO] Insert image '%s' success, digest: %s\n",
+						namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+				}
+			}
+		}
+
 		errCnt = 0
-	}
-	// 存储tag下每个arch的image信息
-	for j, _ := range repo.Tags[i].Archs {
-		res, err := StoreArch__(namespace, repository, repo.Tags[i].Name, &repo.Tags[i].Archs[j])
-		if err != nil {
-			fmt.Println("[ERROR] Insert into images failed with: ", err)
-		}
-		if k, _ := res.RowsAffected(); k == 0 {
-			fmt.Printf("[WARN] Image '%s' already exist, digest: %s\n",
-				namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
-		} else {
-			fmt.Printf("Insert image '%s' success, digest: %s\n",
-				namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
-		}
 	}
 }
 

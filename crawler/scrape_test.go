@@ -21,7 +21,7 @@ func TestScrapeRegRepoListRecursive(t *testing.T) {
 				go func(kw string) {
 					defer func() { <-chanLimitMainGoroutine }()
 					fmt.Println("CoreScheduler received keyword: ", kw)
-					asst.Equal("001", kw, "Next keyword for 0000 should be 0001.")
+					asst.Equal("0000000000000001", kw, "Next keyword for -- should be -0.")
 					//asst.Equal("mo0", kw, "Next keyword for mo0 should be mo.")
 				}(kw)
 			case rrl := <-chanRegRepoList:
@@ -29,12 +29,15 @@ func TestScrapeRegRepoListRecursive(t *testing.T) {
 				pagenum++
 				go func(rrl RegisterRepoList__) {
 					defer func() { <-chanLimitMainGoroutine }()
-					fmt.Println("CoreScheduler received rrl begin with: ", rrl.Summaries[0])
+					for _, s := range rrl.Summaries {
+						fmt.Println(s.Name, s.Source)
+					}
+					//fmt.Println("CoreScheduler received rrl begin with: ", rrl.Summaries[0])
 				}(rrl)
 			}
 		}
 	}()
-	ScrapeRegRepoListRecursive("000", "community")
+	ScrapeRegRepoListRecursive("0000000000000000", "community")
 	//ScrapeRegRepoListRecursive("mo", "community")
 
 	time.Sleep(time.Second)
@@ -42,7 +45,7 @@ func TestScrapeRegRepoListRecursive(t *testing.T) {
 
 func TestScrapeRepoInfo(t *testing.T) {
 	// 只有1个tag的基本验证
-	ScrapeRepoInfo("xmrig2021", "r2021")
+	//ScrapeRepoInfo("xmrig2021", "r2021")
 	// 有更多tags的仓库
-	//ScrapeRepoInfo("patsissons", "xmrig")
+	ScrapeRepoInfo("patsissons", "xmrig")
 }

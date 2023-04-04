@@ -34,7 +34,7 @@ func StartRecursive() {
 	// 传入初始Keyword，启动整个爬取过程
 	cur, err := dockerDB.GetLastKeyword()
 	if strings.Contains(err.Error(), "no rows in result set") {
-		cur = "00"
+		cur = "--"
 	} else {
 		cur = GenerateNextKeyword(cur, true)
 	}

@@ -45,7 +45,7 @@ func GetHTTPSProxy() string {
 
 // GetHTTPSProxyRemote 从远程API返回一个新的代理地址
 func GetHTTPSProxyRemote() string {
-	return ""
+	return "http://127.0.0.1:80"
 }
 
 // GetHTTPSProxyLocal 从本地proxy pool随机返回一个代理地址
