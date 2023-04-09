@@ -25,3 +25,7 @@ func TestGenerateNextKeyword(t *testing.T) {
 		t.Fatal("abc- t -> abc0")
 	}
 }
+
+func TestKDLProxiesMaintainer(t *testing.T) {
+	KDLProxiesMaintainer()
+}

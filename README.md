@@ -34,6 +34,19 @@ in `DockerCrawler/crawler/`, json file format should be structured like the exam
 }
 ```
 
+Besides, we originally use proxies from [kuaidaili](https://www.kuaidaili.com/) and implement automatic proxy
+updater to monitor the life of every proxy-ip and substitude those ips to be out-of-life with new ones.
+
+If you decide to use kuaidaili as proxy-ip source too, just create a file named "secret.json" under the directory
+crawler/, and the content should be:
+
+```json
+{
+  "secret_id": "",
+  "secret_key": ""
+}
+```
+
 ### Other Configs
 
 ## Documents

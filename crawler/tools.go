@@ -1,5 +1,20 @@
 package crawler
 
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/kuaidaili/golang-sdk/api-sdk/kdl/auth"
+	"github.com/kuaidaili/golang-sdk/api-sdk/kdl/client"
+	"github.com/kuaidaili/golang-sdk/api-sdk/kdl/signtype"
+	"log"
+	"math/rand"
+	"os"
+	"path"
+	"runtime"
+	"strconv"
+	"time"
+)
+
 // LegalRuneList 作为生成时参考的字符表
 var LegalRuneList = [...]rune{
 	'-',
@@ -38,23 +53,139 @@ func GenerateNextKeyword(curr string, flg bool) string {
 	}
 }
 
-// GetHTTPSProxy 按策略返回一个代理地址
+// GetHTTPSProxy 从Proxies中随机返回一个代理
 func GetHTTPSProxy() string {
-	return GetHTTPSProxyRemote()
+	// 目前用于快代理
+	p := GetProxyList()
+	cnt := 0
+	for len(p) == 0 {
+		cnt++
+		fmt.Println("[WARN] Proxies Null, Waiting for update...")
+		if cnt > 12 {
+			fmt.Println("[ERROR] Proxies Null for a period, exit!!!")
+			panic("Proxies Null")
+		}
+		time.Sleep(5 * time.Second)
+		p = GetProxyList()
+	}
+	return "http://" + p[rand.Intn(len(p))]
 }
 
-// GetHTTPSProxyRemote 从Proxies中随机返回一个代理地址。
-func GetHTTPSProxyRemote() string {
-	return "http://127.0.0.1:80"
+// KDLProxiesMaintainer 利用快代理提供的go-sdk持续维护本地的Proxies变量
+func KDLProxiesMaintainer() {
+	// 读取快代理secret_id和secret_key
+	secret := struct {
+		Id  string `json:"secret_id"`
+		Key string `json:"secret_key"`
+	}{}
+	_, filename, _, _ := runtime.Caller(0)
+	rootdir := path.Dir(path.Dir(filename))
+	secretFile := rootdir + "/crawler/secret.json"
+	// 加载DockerCrawler Config
+	fb, err := os.ReadFile(secretFile)
+	if err != nil {
+		fmt.Println("[ERROR] Failed to load ", secretFile, err)
+	}
+	if err = json.Unmarshal(fb, &secret); err != nil {
+		fmt.Printf("[ERROR] Json failed to unmarshal %s with err: %v\n", secretFile, err)
+	}
+
+	// 创建快代理sdk要求的客户端
+	kdlAuth := auth.Auth{SecretID: secret.Id, SecretKey: secret.Key}
+	kdlClient := client.Client{Auth: kdlAuth}
+
+	// 获取订单到期时间, 返回时间字符串
+	//expireTime, err := kdlClient.GetOrderExpireTime(signtype.HmacSha1)
+	//if err != nil {
+	//	log.Println(err)
+	//}
+	//fmt.Println("expire time: ", expireTime)
+
+	//设置ip白名单，参数类型为[]string
+	_, err = kdlClient.SetIPWhitelist([]string{"58.246.183.50"}, signtype.HmacSha1)
+	if err != nil {
+		log.Fatal("[ERROR] Kuaidaili SetIPWhitelist failed with: ", err)
+	}
+
+	// 每5秒钟检查一次Proxies.Addresses中的代理存活期，如果剩余存活时间不足10s，则发起请求更换为新的代理地址
+	for {
+		UpdateProxies(&kdlClient)
+		time.Sleep(5 * time.Second)
+	}
 }
 
-// GetHTTPSProxyLocal 从本地proxy pool随机返回一个代理地址
-func GetHTTPSProxyLocal() string {
-	return ""
+// UpdateProxies 更新本地的proxies。
+// 检查本地IP有效性与存活时间，对于无效和存活时间不足10s的，更换新的一批进来
+func UpdateProxies(c *client.Client) {
+	// 记录总的需要更新的量
+	p := GetProxyList()
+	cnt := 10 - len(p) // 不为0表示正在初始化Proxies
+
+	if cnt != 0 {
+		Proxies.Valid = make(map[string]bool)
+	}
+
+	// 尝试更新直到有10个验证有效的代理
+	for {
+		// 不是初始化，而是日常检查代理状态
+		if cnt == 0 {
+			// 删除失效代理
+			// 检测私密代理有效性， 返回map[string]bool, ip:true/false
+			valids, err := c.CheckDpsValid(GetProxyList(), signtype.HmacSha1)
+			if err != nil {
+				log.Println("[ERROR] Kuaidaili CheckDpsValid failed with: ", err)
+			}
+			for ip, valid := range valids {
+				if !valid {
+					delete(Proxies.Valid, ip)
+					cnt++
+				}
+			}
+
+			// 删除存活时间不足10s的代理
+			// 获取私密代理剩余时间(单位为秒), 返回map[string]string, ip:seconds
+			seconds, err := c.GetDpsValidTime(GetProxyList(), signtype.Token)
+			if err != nil {
+				log.Println("[ERROR] Kuaidaili GetDpsValidTime failed with: ", err)
+			}
+			for ip, sec := range seconds {
+				if i, _ := strconv.Atoi(sec); i < 10 {
+					delete(Proxies.Valid, ip)
+					cnt++
+				}
+			}
+		}
+
+		// 当前代理全部有效，退出
+		if cnt == 0 {
+			//fmt.Println("[INFO] UpdateProxies succeed!!!")
+			return
+		}
+
+		// 获取新的代理填入Proxies
+		// 提取私密代理, 参数有: 提取数量、鉴权方式及其他参数(放入map[string]interface{}中, 若无则传入nil)
+		// (具体有哪些其他参数请参考帮助中心: "https://www.kuaidaili.com/doc/api/getdps/")
+		params := map[string]interface{}{"format": "json"}
+		ips, err := c.GetDps(cnt, signtype.HmacSha1, params)
+		if err != nil {
+			log.Println(err)
+		}
+		for _, ip := range ips {
+			Proxies.Valid[ip] = true
+		}
+
+		cnt = 0
+	}
 }
 
-// UpdateProxies 更新本地的proxy pool。
-// 从快代理提取一批IP保存到全局Proxies变量中。
-func UpdateProxies() {
-	return
+// GetProxyList 返回Proxies.Valid的键列表。
+// 仅对快代理部分有效
+func GetProxyList() []string {
+	proxies := make([]string, len(Proxies.Valid))
+	i := 0
+	for k, _ := range Proxies.Valid {
+		proxies[i] = k
+		i++
+	}
+	return proxies
 }

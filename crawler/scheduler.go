@@ -29,16 +29,22 @@ var (
 
 // StartRecursive 是Proxy稳定状态下整个DockerCrawler的入口函数
 func StartRecursive() {
+	// 启动代理监视器
+	go KDLProxiesMaintainer()
+	fmt.Println("[+] KDLProxiesMaintainer startup")
 	// 启动核心调度器
 	go CoreScheduler()
+	fmt.Println("[+] CoreScheduler startup")
 	// 传入初始Keyword，启动整个爬取过程
 	cur, err := dockerDB.GetLastKeyword()
-	if strings.Contains(err.Error(), "no rows in result set") {
+	if err != nil && strings.Contains(err.Error(), "no rows in result set") {
 		cur = "--"
 	} else {
 		cur = GenerateNextKeyword(cur, true)
 	}
+	fmt.Println("[+] Current keyword: ", cur)
 	chanKeyword <- cur
+	<-chanDone
 }
 
 // CrawlDockerHubStaged 划分阶段进行整个DockerHub的爬取。
@@ -78,10 +84,10 @@ func CoreScheduler() {
 					ScrapeRepoInfo(namespace, repository)
 				}
 			}(rrl)
-		case <-chanDone:
-			fmt.Println("[+] All Done")
-			fmt.Println("[+] DockerCrawler Exit")
-			return
+			//case <-chanDone:
+			//	fmt.Println("[+] All Done")
+			//	fmt.Println("[+] DockerCrawler Exit")
+			//	return
 		}
 	}
 }

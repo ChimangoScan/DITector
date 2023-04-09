@@ -18,7 +18,7 @@ var ConfigCrawler struct {
 
 var Proxies struct {
 	Addresses []string `json:"proxies"`
-	Banned    []string
+	Valid     map[string]bool
 }
 
 var UserAgents = [...]string{
@@ -80,8 +80,7 @@ func init() {
 			fmt.Println("[+] Init Proxies From Local Success: ", Proxies)
 		}
 	} else {
-		UpdateProxies()
-		fmt.Println("[+] Init Proxies From Remote Success: ", Proxies)
+		fmt.Println("[+] Init Proxies From Remote: Kuaidaili")
 	}
 
 	// 初始化数据库连接
