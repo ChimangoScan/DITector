@@ -108,6 +108,9 @@ func RepoScheduler() {
 			go func(rname string) {
 				defer func() { <-chanRegLimit }()
 				ns := strings.Split(rname, "/")
+				if len(ns) != 2 {
+					return
+				}
 				namespace, repository := ns[0], ns[1]
 				ScrapeRepoInfo(namespace, repository)
 			}(s)
