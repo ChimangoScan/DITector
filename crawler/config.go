@@ -14,6 +14,7 @@ var ConfigCrawler struct {
 	MaxThread  int    `json:"max_thread"`
 	LocalProxy bool   `json:"local_proxy"`
 	ProxyFile  string `json:"proxy_file"`
+	DataDir    string `json:"data_dir"`
 }
 
 var Proxies struct {
@@ -91,5 +92,25 @@ func init() {
 	err = dockerDB.Ping()
 	if err != nil {
 		log.Fatalln("[ERROR] Ping mysql database failed with: ", err)
+	}
+
+	// 初始化json文件fd
+	fileRepository, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "repository.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	if err != nil {
+		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "repository.json"), err)
+	} else {
+		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "repository.json"))
+	}
+	fileTags, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "tags.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	if err != nil {
+		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "tags.json"), err)
+	} else {
+		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "tags.json"))
+	}
+	fileImages, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "images.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	if err != nil {
+		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "images.json"), err)
+	} else {
+		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "images.json"))
 	}
 }

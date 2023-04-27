@@ -1,8 +1,6 @@
 package main
 
-import (
-	"crawler"
-)
+import "crawler"
 
 func main() {
 	crawler.StartRecursive()

@@ -157,7 +157,7 @@ func ScrapeRepoInfo(namespace, repository string) {
 
 	var (
 		errCnt int8
-		repo   Repository__
+		repo   = Repository__{}
 	)
 
 	// 爬取Metadata
@@ -182,18 +182,31 @@ func ScrapeRepoInfo(namespace, repository string) {
 	errCnt = 0
 
 	// 存储Metadata
-	res, err := StoreRepository__(&repo)
+
+	// 写入json文件的版本
+	insRows, err := StoreRepository__ToFile(&repo)
 	if err != nil {
-		fmt.Println("[ERROR] Insert into repository failed with: ", err)
+		fmt.Printf("[ERROR] Insert '%s' into repository.json failed with: %s\n", namespace+"/"+repository, err)
 		return
 	}
-	// TODO: 后面要添加update数据库需要对修改
-	if i, _ := res.RowsAffected(); i == 0 {
-		fmt.Printf("[WARN] Repository '%s' already exists.", namespace+"/"+repository)
-		//return
+	if insRows <= 0 {
+		fmt.Printf("[ERROR] Insert '%s' into repository.json with %d bytes inserted\n", namespace+"/"+repository, insRows)
 	} else {
-		fmt.Printf("[INFO] Insert repository '%s' success.\n", namespace+"/"+repository)
+		fmt.Printf("[INFO] Insert repository '%s' into repository.json success.\n", namespace+"/"+repository)
 	}
+	// 存入mysql的版本
+	//res, err := StoreRepository__(&repo)
+	//if err != nil {
+	//	fmt.Println("[ERROR] Insert into repository failed with: ", err)
+	//	return
+	//}
+	//// TODO: 后面要添加update数据库需要对修改
+	//if i, _ := res.RowsAffected(); i == 0 {
+	//	fmt.Printf("[WARN] Repository '%s' already exists.", namespace+"/"+repository)
+	//	//return
+	//} else {
+	//	fmt.Printf("[INFO] Insert repository '%s' success.\n", namespace+"/"+repository)
+	//}
 
 	// 爬所有Tags，可能涉及多页，建管道维护
 	chTags := make(chan TagReceiver__)
@@ -222,29 +235,53 @@ func ScrapeRepoInfo(namespace, repository string) {
 				repo.Tags = append(repo.Tags, tags.Results...)
 				// 存储tags
 				for i, _ := range tags.Results {
-					res, err = StoreTag__(namespace, repository, &tags.Results[i])
+					// 写入文件
+					insRows, err = StoreTag__ToFile(namespace, repository, &tags.Results[i])
 					if err != nil {
-						fmt.Println("[ERROR] Insert into tags failed with: ", err)
+						fmt.Printf("[ERROR] Insert '%s' into tags.json failed with: %s\n", namespace+"/"+repository+":"+tags.Results[i].Name, err)
 					}
-					if j, _ := res.RowsAffected(); j == 0 {
-						fmt.Printf("[WARN] Tag '%s' for repository '%s' already exist.\n", tags.Results[i].Name, namespace+"/"+repository)
+					if insRows <= 0 {
+						fmt.Printf("[ERROR] Insert '%s' into tags.json with %d bytes inserted\n", namespace+"/"+repository+":"+tags.Results[i].Name, insRows)
 					} else {
-						fmt.Printf("[INFO] Insert tag '%s' for repository '%s' success.\n", tags.Results[i].Name, namespace+"/"+repository)
+						fmt.Printf("[INFO] Insert tag '%s' into tags.json success.\n", namespace+"/"+repository+":"+tags.Results[i].Name)
 					}
+
+					// 存入mysql
+					//res, err = StoreTag__(namespace, repository, &tags.Results[i])
+					//if err != nil {
+					//	fmt.Println("[ERROR] Insert into tags failed with: ", err)
+					//}
+					//if j, _ := res.RowsAffected(); j == 0 {
+					//	fmt.Printf("[WARN] Tag '%s' for repository '%s' already exist.\n", tags.Results[i].Name, namespace+"/"+repository)
+					//} else {
+					//	fmt.Printf("[INFO] Insert tag '%s' for repository '%s' success.\n", tags.Results[i].Name, namespace+"/"+repository)
+					//}
 				}
 			} else {
 				repo.Tags = append(repo.Tags, tags.Results...)
 				// 存储tags
 				for i, _ := range tags.Results {
-					res, err = StoreTag__(namespace, repository, &tags.Results[i])
+					// 写入文件
+					insRows, err = StoreTag__ToFile(namespace, repository, &tags.Results[i])
 					if err != nil {
-						fmt.Println("[ERROR] Insert into tags failed with: ", err)
+						fmt.Printf("[ERROR] Insert '%s' into tags.json failed with: %s\n", namespace+"/"+repository+":"+tags.Results[i].Name, err)
 					}
-					if j, _ := res.RowsAffected(); j == 0 {
-						fmt.Printf("[WARN] Tag '%s' for repository '%s' already exist.\n", tags.Results[i].Name, namespace+"/"+repository)
+					if insRows <= 0 {
+						fmt.Printf("[ERROR] Insert '%s' into tags.json with %d bytes inserted\n", namespace+"/"+repository+":"+tags.Results[i].Name, insRows)
 					} else {
-						fmt.Printf("[INFO] Insert tag '%s' for repository '%s' success.\n", tags.Results[i].Name, namespace+"/"+repository)
+						fmt.Printf("[INFO] Insert tag '%s' into tags.json success.\n", namespace+"/"+repository+":"+tags.Results[i].Name)
 					}
+
+					// 存入mysql
+					//res, err = StoreTag__(namespace, repository, &tags.Results[i])
+					//if err != nil {
+					//	fmt.Println("[ERROR] Insert into tags failed with: ", err)
+					//}
+					//if j, _ := res.RowsAffected(); j == 0 {
+					//	fmt.Printf("[WARN] Tag '%s' for repository '%s' already exist.\n", tags.Results[i].Name, namespace+"/"+repository)
+					//} else {
+					//	fmt.Printf("[INFO] Insert tag '%s' for repository '%s' success.\n", tags.Results[i].Name, namespace+"/"+repository)
+					//}
 				}
 			}
 		}
@@ -305,6 +342,10 @@ func ScrapeRepoInfo(namespace, repository string) {
 		//rd := time.Duration(rand.Int63n(int64(5 * time.Second)))
 		//time.Sleep(rd)
 		ca := GetImageHistoryCollector(&repo.Tags[i].Archs)
+		// 检查下可能的空字段，可能能防segment violation??? 不能，但是有可能能防一些错误
+		if repo.Namespace == "" || repo.Name == "" || repo.Tags[i].Name == "" {
+			continue
+		}
 		for err = ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name)); err != nil; err = ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name)) {
 			if errCnt == 0 {
 				if strings.Contains(err.Error(), "Not Found") {
@@ -326,17 +367,29 @@ func ScrapeRepoInfo(namespace, repository string) {
 		if errCnt < 12 {
 			// 存储tag下每个arch的image信息
 			for j, _ := range repo.Tags[i].Archs {
-				res, errS := StoreArch__(namespace, repository, repo.Tags[i].Name, &repo.Tags[i].Archs[j])
-				if errS != nil {
-					fmt.Println("[ERROR] Insert image ", namespace+"/"+repository+":"+repo.Tags[i].Name, " into images failed with: ", errS)
+				// 写入文件
+				insRows, err = StoreArch__ToFile(namespace, repository, repo.Tags[i].Name, &repo.Tags[i].Archs[j])
+				if err != nil {
+					fmt.Printf("[ERROR] Insert '%s' into images.json failed with: %s\n", namespace+"/"+repository+":"+repo.Tags[i].Name, err)
 				}
-				if k, _ := res.RowsAffected(); k == 0 {
-					fmt.Printf("[WARN] Image '%s' already exist, digest: %s\n",
-						namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+				if insRows <= 0 {
+					fmt.Printf("[ERROR] Insert '%s' into images.json with %d bytes inserted\n", namespace+"/"+repository+":"+repo.Tags[i].Name, insRows)
 				} else {
-					fmt.Printf("[INFO] Insert image '%s' success, digest: %s\n",
-						namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+					fmt.Printf("[INFO] Insert tag '%s' into images.json success.\n", namespace+"/"+repository+":"+repo.Tags[i].Name)
 				}
+
+				// 存入mysql
+				//res, errS := StoreArch__(namespace, repository, repo.Tags[i].Name, &repo.Tags[i].Archs[j])
+				//if errS != nil {
+				//	fmt.Println("[ERROR] Insert image ", namespace+"/"+repository+":"+repo.Tags[i].Name, " into images failed with: ", errS)
+				//}
+				//if k, _ := res.RowsAffected(); k == 0 {
+				//	fmt.Printf("[WARN] Image '%s' already exist, digest: %s\n",
+				//		namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+				//} else {
+				//	fmt.Printf("[INFO] Insert image '%s' success, digest: %s\n",
+				//		namespace+"/"+repository+":"+repo.Tags[i].Name, repo.Tags[i].Archs[j].Digest)
+				//}
 			}
 		}
 

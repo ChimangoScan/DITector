@@ -3,9 +3,88 @@ package crawler
 import (
 	"database/sql"
 	"encoding/json"
+	"os"
+	"sync"
 )
 
 // 实现数据持久化的简单接口
+
+// 先不直接存储到数据库了，改成添加到文件中，以下内容在config.go中初始化
+var (
+	fileRepository *os.File
+	lockRepository = sync.Mutex{}
+	fileTags       *os.File
+	lockTags       = sync.Mutex{}
+	fileImages     *os.File
+	lockImages     = sync.Mutex{}
+)
+
+// StoreRepository__ToFile 将Repository__存储到文件fileRepository中
+func StoreRepository__ToFile(r *Repository__) (int, error) {
+	lockRepository.Lock()
+	defer lockRepository.Unlock()
+	b, err := json.Marshal(r)
+	if err != nil {
+		return 0, err
+	}
+	n, err := fileRepository.Write(b)
+	if err != nil {
+		return 0, err
+	}
+	fileRepository.WriteString("\n")
+	return n, err
+}
+
+// StoreTag__ToFile 将Tag__存储到文件fileTags中
+func StoreTag__ToFile(namespace, repository string, t *Tag__) (int, error) {
+	lockTags.Lock()
+	defer lockTags.Unlock()
+	tmp := struct {
+		Namespace           string
+		Repository          string
+		Name                string `json:"name"`
+		LastUpdated         string `json:"last_updated"`
+		LastUpdaterUsername string `json:"last_updater_username"`
+		TagLastPulled       string `json:"tag_last_pulled"`
+		TagLastPushed       string `json:"tag_last_pushed"`
+		MediaType           string `json:"media_type"`
+		ContentType         string `json:"content_type"`
+	}{namespace, repository, t.Name, t.LastUpdated, t.LastUpdaterUsername,
+		t.TagLastPulled, t.TagLastPushed, t.MediaType, t.ContentType}
+	b, err := json.Marshal(tmp)
+	if err != nil {
+		return 0, err
+	}
+	n, err := fileTags.Write(b)
+	if err != nil {
+		return 0, err
+	}
+	fileTags.WriteString("\n")
+	return n, err
+}
+
+// StoreArch__ToFile 将image存储到文件fileImages中
+func StoreArch__ToFile(namespace, repository, tag string, a *Arch__) (int, error) {
+	lockImages.Lock()
+	defer lockImages.Unlock()
+	tmp := struct {
+		Namespace  string
+		Repository string
+		Tag        string
+		Arch       *Arch__
+	}{namespace, repository, tag, a}
+	b, err := json.Marshal(tmp)
+
+	if err != nil {
+		return 0, err
+	}
+	n, err := fileImages.Write(b)
+	if err != nil {
+		return 0, err
+	}
+	fileImages.WriteString("\n")
+	return n, err
+}
 
 // StoreRepository__ 将Repository__直接组织成合适的形式存入数据库
 func StoreRepository__(r *Repository__) (sql.Result, error) {
