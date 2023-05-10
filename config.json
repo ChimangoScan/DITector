@@ -5,6 +5,5 @@
   "data_dir": "/mysql/json-files",
   "repository_file": "library-repository.json",
   "tags_file": "library-tags.json",
-  "images_file": "library-images.json",
-  "library_flag": true
+  "images_file": "library-images.json"
 }

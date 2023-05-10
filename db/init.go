@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-func init() {
+func InitDB(format string) {
 	dsn := "docker:docker@%s/%s"
 
 	// 初始化创建新的database，命名为dockerhub
@@ -21,7 +21,6 @@ func init() {
 	if err := db.Ping(); err != nil {
 		log.Fatalln("[ERROR] Ping mysql database failed with err: ", err)
 	}
-	fmt.Println("[+] Ping mysql Success.")
 
 	createDatabase := `CREATE DATABASE IF NOT EXISTS dockerhub`
 	_, err = db.Exec(createDatabase)
@@ -56,8 +55,10 @@ CREATE TABLE IF NOT EXISTS keywords
 		fmt.Println("[+] CREATE TABLE keywords success.")
 	}
 
-	// 创建repository表
-	createRepository := `
+	// 只在需要使用mysql存储爬虫结果时才初始化其他表
+	if format == "mysql" {
+		// 创建repository表
+		createRepository := `
 CREATE TABLE IF NOT EXISTS repository
 (
     user VARCHAR(255),
@@ -73,15 +74,15 @@ CREATE TABLE IF NOT EXISTS repository
 	full_description LONGTEXT,
 	PRIMARY KEY (namespace,name)
 );`
-	_, err = db2.Exec(createRepository)
-	if err != nil {
-		log.Fatalln("[ERROR] CREATE TABLE repository failed with err: ", err)
-	} else {
-		fmt.Println("[+] CREATE TABLE repository success.")
-	}
+		_, err = db2.Exec(createRepository)
+		if err != nil {
+			log.Fatalln("[ERROR] CREATE TABLE repository failed with err: ", err)
+		} else {
+			fmt.Println("[+] CREATE TABLE repository success.")
+		}
 
-	// 创建tags表
-	createTags := `
+		// 创建tags表
+		createTags := `
 CREATE TABLE IF NOT EXISTS tags
 (
     namespace VARCHAR(255),
@@ -95,15 +96,15 @@ CREATE TABLE IF NOT EXISTS tags
     content_type TINYTEXT,
     PRIMARY KEY (namespace, repository, name)
 );`
-	_, err = db2.Exec(createTags)
-	if err != nil {
-		log.Fatalln("[ERROR] CREATE TABLE tags failed with err: ", err)
-	} else {
-		fmt.Println("[+] CREATE TABLE tags success.")
-	}
+		_, err = db2.Exec(createTags)
+		if err != nil {
+			log.Fatalln("[ERROR] CREATE TABLE tags failed with err: ", err)
+		} else {
+			fmt.Println("[+] CREATE TABLE tags success.")
+		}
 
-	// 创建images表，真正对应到image上，包含层信息，来自Arch__
-	createImages := `
+		// 创建images表，真正对应到image上，包含层信息，来自Arch__
+		createImages := `
 CREATE TABLE IF NOT EXISTS images
 (
     namespace VARCHAR(255),
@@ -120,25 +121,26 @@ CREATE TABLE IF NOT EXISTS images
     last_pushed TIMESTAMP,
     layers LONGTEXT
 );`
-	_, err = db2.Exec(createImages)
-	if err != nil {
-		log.Fatalln("[ERROR] CREATE TABLE images failed with err: ", err)
-	} else {
-		fmt.Println("[+] CREATE TABLE images success.")
-	}
+		_, err = db2.Exec(createImages)
+		if err != nil {
+			log.Fatalln("[ERROR] CREATE TABLE images failed with err: ", err)
+		} else {
+			fmt.Println("[+] CREATE TABLE images success.")
+		}
 
-	// 创建layers表
-	createLayers := `
+		// 创建layers表
+		createLayers := `
 CREATE TABLE IF NOT EXISTS layers
 (
     digest CHAR(64) PRIMARY KEY,
     size BIGINT,
     instruction TEXT
 );`
-	_, err = db2.Exec(createLayers)
-	if err != nil {
-		log.Fatalln("[ERROR] CREATE TABLE layers failed with err: ", err)
-	} else {
-		fmt.Println("[+] CREATE TABLE layers success.")
+		_, err = db2.Exec(createLayers)
+		if err != nil {
+			log.Fatalln("[ERROR] CREATE TABLE layers failed with err: ", err)
+		} else {
+			fmt.Println("[+] CREATE TABLE layers success.")
+		}
 	}
 }

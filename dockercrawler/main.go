@@ -1,7 +1,34 @@
 package main
 
-import "crawler"
+import (
+	"buildgraph"
+	"crawler"
+	"flag"
+)
 
 func main() {
-	crawler.StartRecursive()
+	var (
+		crawl       string // 指定要爬的镜像仓库，比如dockerhub
+		libraryFlag bool   // 爬虫是否爬官方镜像
+
+		buildGraph bool // 是否要建信息库
+
+		format string // 爬虫存储格式/信息库从什么格式中取内容，json、mysql
+	)
+
+	flag.StringVar(&crawl, "crawl", "", "register to crawl, e.g. dockerhub")
+	flag.BoolVar(&libraryFlag, "official", false, "true for crawling official images; false for crawling community images")
+	flag.BoolVar(&buildGraph, "build-graph", false, "true for building graph based on crawler results")
+	flag.StringVar(&format, "format", "json", "format for crawling or building graph, e.g. json, mysql")
+	flag.Parse()
+
+	if crawl != "" {
+		if crawl == "dockerhub" {
+			crawler.StartRecursive(format, libraryFlag)
+		}
+	} else if buildGraph {
+		if format == "json" {
+			buildgraph.BuildFromJSON()
+		}
+	}
 }

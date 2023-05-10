@@ -34,10 +34,17 @@ var (
 var libraryFlag bool
 
 // StartRecursive 是Proxy稳定状态下整个DockerCrawler的入口函数
-func StartRecursive() {
-	// 启动代理监视器
-	go KDLProxiesMaintainer()
-	fmt.Println("[+] KDLProxiesMaintainer startup")
+func StartRecursive(format string, library bool) {
+	// 配置crawler（原init()，为防止build-graph时也调用init，改为config）
+	config(format)
+
+	libraryFlag = library
+
+	// 从服务商获取IP代理，启动代理监视器，这里目前是快代理
+	if !ConfigCrawler.LocalProxy {
+		go KDLProxiesMaintainer()
+		fmt.Println("[+] KDLProxiesMaintainer startup")
+	}
 
 	// 启动核心调度器
 	if libraryFlag {
@@ -51,16 +58,20 @@ func StartRecursive() {
 	// 启动RepoInfo爬取调度器
 	go RepoScheduler()
 	fmt.Println("[+] RepoScheduler startup")
-	// 传入初始Keyword，启动整个爬取过程
-	cur, err := dockerDB.GetLastKeyword()
-	if err != nil && strings.Contains(err.Error(), "no rows in result set") {
-		cur = "--"
-	} else {
-		// 有时候崩溃导致当前cur下很多repository的tag和image没爬完，暂时不自动使用下一个了
-		//cur = GenerateNextKeyword(cur, true)
+
+	// 爬community时传入初始Keyword，启动整个爬取过程
+	if !libraryFlag {
+		cur, err := dockerDB.GetLastKeyword()
+		if err != nil && strings.Contains(err.Error(), "no rows in result set") {
+			cur = "--"
+		} else {
+			// 有时候崩溃导致当前cur下很多repository的tag和image没爬完，暂时不自动使用下一个了
+			//cur = GenerateNextKeyword(cur, true)
+		}
+		fmt.Println("[+] Current keyword: ", cur)
+		chanKeyword <- cur
 	}
-	fmt.Println("[+] Current keyword: ", cur)
-	chanKeyword <- cur
+
 	<-chanDone
 }
 
@@ -102,10 +113,6 @@ func CoreScheduler() {
 					chanRegName <- s.Name
 				}
 			}(rrl)
-			//case <-chanDone:
-			//	fmt.Println("[+] All Done")
-			//	fmt.Println("[+] DockerCrawler Exit")
-			//	return
 		}
 	}
 }

@@ -68,18 +68,23 @@ func GenerateNextKeyword(curr string, flg bool) string {
 
 // GetHTTPSProxy 从Proxies中随机返回一个代理
 func GetHTTPSProxy() string {
-	// 目前用于快代理
-	p := GetProxyList()
-	cnt := 0
-	for len(p) == 0 {
-		cnt++
-		fmt.Println("[WARN] Proxies Null, Waiting for update...")
-		if cnt > 12 {
-			fmt.Println("[ERROR] Proxies Null for a period, exit!!!")
-			panic("Proxies Null")
+	var p []string
+	if ConfigCrawler.LocalProxy {
+		p = Proxies.Addresses
+	} else {
+		// 目前用于快代理
+		p = KDLGetProxyList()
+		cnt := 0
+		for len(p) == 0 {
+			cnt++
+			fmt.Println("[WARN] Proxies Null, Waiting for update...")
+			if cnt > 12 {
+				fmt.Println("[ERROR] Proxies Null for a period, exit!!!")
+				panic("Proxies Null")
+			}
+			time.Sleep(5 * time.Second)
+			p = KDLGetProxyList()
 		}
-		time.Sleep(5 * time.Second)
-		p = GetProxyList()
 	}
 	return "http://" + p[rand.Intn(len(p))]
 }
@@ -93,7 +98,7 @@ func KDLProxiesMaintainer() {
 	}{}
 	_, filename, _, _ := runtime.Caller(0)
 	rootdir := path.Dir(path.Dir(filename))
-	secretFile := rootdir + "/crawler/secret.json"
+	secretFile := rootdir + "/secret.json"
 	// 加载DockerCrawler Config
 	fb, err := os.ReadFile(secretFile)
 	if err != nil {
@@ -107,31 +112,18 @@ func KDLProxiesMaintainer() {
 	kdlAuth := auth.Auth{SecretID: secret.Id, SecretKey: secret.Key}
 	kdlClient := client.Client{Auth: kdlAuth}
 
-	// 获取订单到期时间, 返回时间字符串
-	//expireTime, err := kdlClient.GetOrderExpireTime(signtype.HmacSha1)
-	//if err != nil {
-	//	log.Println(err)
-	//}
-	//fmt.Println("expire time: ", expireTime)
-
-	//设置ip白名单，参数类型为[]string
-	//_, err = kdlClient.SetIPWhitelist([]string{"58.246.183.50"}, signtype.HmacSha1)
-	//if err != nil {
-	//	log.Fatal("[ERROR] Kuaidaili SetIPWhitelist failed with: ", err)
-	//}
-
 	// 每5秒钟检查一次Proxies.Addresses中的代理存活期，如果剩余存活时间不足10s，则发起请求更换为新的代理地址
 	for {
-		UpdateProxies(&kdlClient)
+		KDLUpdateProxies(&kdlClient)
 		time.Sleep(5 * time.Second)
 	}
 }
 
-// UpdateProxies 更新本地的proxies。
+// KDLUpdateProxies 从快代理更新本地的proxies。
 // 检查本地IP有效性与存活时间，对于无效和存活时间不足10s的，更换新的一批进来
-func UpdateProxies(c *client.Client) {
+func KDLUpdateProxies(c *client.Client) {
 	// 记录总的需要更新的量
-	p := GetProxyList()
+	p := KDLGetProxyList()
 	cnt := 12 - len(p) // 不为0表示正在初始化Proxies
 
 	if cnt != 0 {
@@ -144,7 +136,7 @@ func UpdateProxies(c *client.Client) {
 		if cnt == 0 {
 			// 删除失效代理
 			// 检测私密代理有效性， 返回map[string]bool, ip:true/false
-			valids, err := c.CheckDpsValid(GetProxyList(), signtype.HmacSha1)
+			valids, err := c.CheckDpsValid(KDLGetProxyList(), signtype.HmacSha1)
 			if err != nil {
 				LogProxies(fmt.Sprintf("[ERROR] Kuaidaili CheckDpsValid failed with: %s", err))
 			}
@@ -157,7 +149,7 @@ func UpdateProxies(c *client.Client) {
 
 			// 删除存活时间不足10s的代理
 			// 获取私密代理剩余时间(单位为秒), 返回map[string]string, ip:seconds
-			seconds, err := c.GetDpsValidTime(GetProxyList(), signtype.Token)
+			seconds, err := c.GetDpsValidTime(KDLGetProxyList(), signtype.Token)
 			if err != nil {
 				LogProxies(fmt.Sprintf("[ERROR] Kuaidaili GetDpsValidTime failed with: %s", err))
 			}
@@ -176,7 +168,7 @@ func UpdateProxies(c *client.Client) {
 
 		// 当前代理全部有效，退出
 		if cnt == 0 {
-			//fmt.Println("[INFO] UpdateProxies succeed!!!")
+			//fmt.Println("[INFO] KDLUpdateProxies succeed!!!")
 			return
 		}
 
@@ -199,9 +191,9 @@ func UpdateProxies(c *client.Client) {
 	}
 }
 
-// GetProxyList 返回Proxies.Valid的键列表。
-// 仅对快代理部分有效
-func GetProxyList() []string {
+// KDLGetProxyList 返回Proxies.Valid的键列表。
+// 为目前IP代理：快代理设计
+func KDLGetProxyList() []string {
 	l := len(Proxies.Valid)
 	proxies := make([]string, l)
 	i := 0

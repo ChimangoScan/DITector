@@ -4,5 +4,5 @@ go.work
 go.work.sum
 crawler/proxyaddr.json
 */go.sum
-crawler/secret.json
+secret.json
 .secret

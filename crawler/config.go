@@ -18,7 +18,6 @@ var ConfigCrawler struct {
 	RepositoryFile string `json:"repository_file"`
 	TagsFile       string `json:"tags_file"`
 	ImagesFile     string `json:"images_file"`
-	LibraryFlag    bool   `json:"library_flag"`
 }
 
 var Proxies struct {
@@ -46,7 +45,8 @@ var UserAgents = [...]string{
 
 var dockerDB *db.DockerDB
 
-func init() {
+// config 配置crawler，原init()
+func config(format string) {
 	// 获取程序根目录
 	_, filename, _, _ := runtime.Caller(0)
 	root := path.Dir(path.Dir(filename))
@@ -68,11 +68,45 @@ func init() {
 		runtime.GOMAXPROCS(ConfigCrawler.MaxThread)
 	}
 
-	fmt.Println("Init Crawler Config Success: ", ConfigCrawler)
+	fmt.Println("[+] Init Crawler Config Success: ", ConfigCrawler)
 
 	// 初始化核心调度器的全局管道
 	chanLimitMainGoroutine = make(chan struct{}, ConfigCrawler.MaxThread)
 	chanRegRepoList = make(chan RegisterRepoList__, ConfigCrawler.MaxThread)
+
+	db.InitDB(format)
+	// 初始化数据库连接
+	dockerDB, err = db.NewDockerDB("docker:docker@/dockerhub")
+	if err != nil {
+		log.Fatalln("[ERROR] Open mysql database failed with: ", err)
+	}
+	err = dockerDB.Ping()
+	if err != nil {
+		log.Fatalln("[ERROR] Ping mysql database failed with: ", err)
+	}
+
+	// 初始化存储部分fd
+	if format == "json" {
+		// 初始化json文件fd
+		fileRepository, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.RepositoryFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+		if err != nil {
+			log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "repository.json"), err)
+		} else {
+			fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.RepositoryFile))
+		}
+		fileTags, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.TagsFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+		if err != nil {
+			log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "tags.json"), err)
+		} else {
+			fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.TagsFile))
+		}
+		fileImages, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.ImagesFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+		if err != nil {
+			log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "images.json"), err)
+		} else {
+			fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.ImagesFile))
+		}
+	}
 
 	// 初始化go colly Proxies
 	if ConfigCrawler.LocalProxy {
@@ -88,35 +122,6 @@ func init() {
 		fmt.Println("[+] Init Proxies From Remote: Kuaidaili")
 	}
 
-	// 初始化数据库连接
-	dockerDB, err = db.NewDockerDB("docker:docker@/dockerhub")
-	if err != nil {
-		log.Fatalln("[ERROR] Open mysql database failed with: ", err)
-	}
-	err = dockerDB.Ping()
-	if err != nil {
-		log.Fatalln("[ERROR] Ping mysql database failed with: ", err)
-	}
-
-	// 初始化json文件fd
-	fileRepository, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.RepositoryFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
-	if err != nil {
-		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "repository.json"), err)
-	} else {
-		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.RepositoryFile))
-	}
-	fileTags, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.TagsFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
-	if err != nil {
-		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "tags.json"), err)
-	} else {
-		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.TagsFile))
-	}
-	fileImages, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.ImagesFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
-	if err != nil {
-		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "images.json"), err)
-	} else {
-		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.ImagesFile))
-	}
 	// 代理日志
 	fileProxies, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "proxies.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
@@ -124,7 +129,4 @@ func init() {
 	} else {
 		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "proxies.json"))
 	}
-
-	// 是否在爬官方镜像
-	libraryFlag = ConfigCrawler.LibraryFlag
 }

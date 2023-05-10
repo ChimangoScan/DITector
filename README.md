@@ -18,17 +18,15 @@ After installation of DockerCrawler and other environment requirements (such as 
 
 ### Proxies
 
-Since Docker Hub have a rate-limit 180 times in a period for every ip address, DockerCrawler provide a flexible 
-choice for configuring proxies.
+Docker Hub有访问频率限制：每个IP地址 180次/某时间段, DockerCrawler允许自己配置代理池来防止IP访问过快被禁止访问。
 
-You can configure proxies for DockerCrawler, by simply creating file "proxyaddr.json" (default by config.json)
-in `DockerCrawler/crawler/`, json file format should be structured like the example below:
+如果您已经有一个稳定的静态IP代理池，那么可以在`crawler/`路径下创建`proxyaddr.json`文件（具体路径可以通过config.json设置），按照如下格式组织内容，即可配置代理池。
 
 ```json
 {
   "proxies": [
-    "https://proxyaddr1.com",
-    "https://proxyaddr2.com",
+    "proxyaddr1.com",
+    "proxyaddr2.com",
     "..."
   ]
 }

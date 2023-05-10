@@ -2,7 +2,6 @@ package crawler
 
 import (
 	"fmt"
-	"github.com/gocolly/colly"
 	"strconv"
 	"strings"
 	"sync"
@@ -394,16 +393,4 @@ func ScrapeRepoInfo(namespace, repository string) {
 
 		errCnt = 0
 	}
-}
-
-// ScrapeRepoMetadata
-// TODO: 用于爬取指定repo的metadata，返回一个。
-func ScrapeRepoMetadata(namespace, repo string) {
-
-}
-
-// ScrapeRepoTagsRecursive
-// TODO: 递归爬取指定Repo的全部Tag记录。
-func ScrapeRepoTagsRecursive(c *colly.Collector, namespace, repo string) {
-
 }
