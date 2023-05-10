@@ -77,7 +77,6 @@ func ScrapeRegRepoListRecursive(keyword, source string) {
 		// 代理问题
 		errCnt++
 		// 重试次数过多就退出
-		// TODO: 需要考虑是否需要在次数过多时退出？如果退出下一个keyword应该传什么？
 		if errCnt > 11 {
 			fmt.Println("[ERROR] Getting first page failed for keyword: ", keyword, ", source: ", source, "\nError: ", err)
 
@@ -135,19 +134,21 @@ func ScrapeRegRepoListRecursive(keyword, source string) {
 	close(ch)
 
 	// 一定是函数主体都处理好才向ChanKeyword中传数据，因为ChanKeyword是无缓冲通道，在核心调度器会阻塞。
-	nxt := GenerateNextKeyword(keyword, true)
-	if nxt == "" {
-		// DockerCrawler结束信号
-		chanDone <- struct{}{}
-	} else {
-		// 把当前keyword保存到进度数据库中
-		_, err := dockerDB.InsertKeyword(keyword)
-		if err != nil {
-			fmt.Printf("[ERROR] Insert keyword '%s' into keywords failed with: %s\n", keyword, err)
+	if !libraryFlag {
+		nxt := GenerateNextKeyword(keyword, true)
+		if nxt == "" {
+			// DockerCrawler结束信号
+			chanDone <- struct{}{}
 		} else {
-			fmt.Printf("[+] Insert keyword '%s' success.\n", keyword)
+			// 把当前keyword保存到进度数据库中
+			_, err := dockerDB.InsertKeyword(keyword)
+			if err != nil {
+				fmt.Printf("[ERROR] Insert keyword '%s' into keywords failed with: %s\n", keyword, err)
+			} else {
+				fmt.Printf("[+] Insert keyword '%s' success.\n", keyword)
+			}
+			chanKeyword <- nxt
 		}
-		chanKeyword <- nxt
 	}
 }
 
@@ -335,15 +336,13 @@ func ScrapeRepoInfo(namespace, repository string) {
 	close(chTags)
 
 	// 爬每个Tag的所有Arch History
-	// 随机延时可以在某一刻忽然将Rate-Limit补满，对单IP有效
-	// Test显示71个tag用时142s
 	for i, _ := range repo.Tags {
 		//// 引入随机延时，防止快速达到限制
 		//rd := time.Duration(rand.Int63n(int64(5 * time.Second)))
 		//time.Sleep(rd)
 		ca := GetImageHistoryCollector(&repo.Tags[i].Archs)
-		// 检查下可能的空字段，可能能防segment violation??? 不能，但是有可能能防一些错误
-		if repo.Namespace == "" || repo.Name == "" || repo.Tags[i].Name == "" {
+		// 检查下可能的空字段，可能能防segment violation??????
+		if &repo.Tags[i] == nil || repo.Tags[i].Name == "" {
 			continue
 		}
 		for err = ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name)); err != nil; err = ca.Visit(GetImageHistoryURL(repo.Namespace, repo.Name, repo.Tags[i].Name)) {

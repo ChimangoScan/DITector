@@ -11,10 +11,14 @@ import (
 )
 
 var ConfigCrawler struct {
-	MaxThread  int    `json:"max_thread"`
-	LocalProxy bool   `json:"local_proxy"`
-	ProxyFile  string `json:"proxy_file"`
-	DataDir    string `json:"data_dir"`
+	MaxThread      int    `json:"max_thread"`
+	LocalProxy     bool   `json:"local_proxy"`
+	ProxyFile      string `json:"proxy_file"`
+	DataDir        string `json:"data_dir"`
+	RepositoryFile string `json:"repository_file"`
+	TagsFile       string `json:"tags_file"`
+	ImagesFile     string `json:"images_file"`
+	LibraryFlag    bool   `json:"library_flag"`
 }
 
 var Proxies struct {
@@ -95,23 +99,23 @@ func init() {
 	}
 
 	// 初始化json文件fd
-	fileRepository, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "repository.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	fileRepository, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.RepositoryFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
 		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "repository.json"), err)
 	} else {
-		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "repository.json"))
+		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.RepositoryFile))
 	}
-	fileTags, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "tags.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	fileTags, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.TagsFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
 		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "tags.json"), err)
 	} else {
-		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "tags.json"))
+		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.TagsFile))
 	}
-	fileImages, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "images.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	fileImages, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, ConfigCrawler.ImagesFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
 		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigCrawler.DataDir, "images.json"), err)
 	} else {
-		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "images.json"))
+		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, ConfigCrawler.ImagesFile))
 	}
 	// 代理日志
 	fileProxies, err = os.OpenFile(path.Join(ConfigCrawler.DataDir, "proxies.json"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
@@ -120,4 +124,7 @@ func init() {
 	} else {
 		fmt.Println("[+] Open file succeed: ", path.Join(ConfigCrawler.DataDir, "proxies.json"))
 	}
+
+	// 是否在爬官方镜像
+	libraryFlag = ConfigCrawler.LibraryFlag
 }

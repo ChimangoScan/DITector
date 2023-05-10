@@ -30,13 +30,23 @@ var (
 	chanDone = make(chan struct{})
 )
 
+// libraryFlag 用于指示当前是否在爬取官方镜像
+var libraryFlag bool
+
 // StartRecursive 是Proxy稳定状态下整个DockerCrawler的入口函数
 func StartRecursive() {
 	// 启动代理监视器
 	go KDLProxiesMaintainer()
 	fmt.Println("[+] KDLProxiesMaintainer startup")
+
 	// 启动核心调度器
-	go CoreScheduler()
+	if libraryFlag {
+		// 启动官方镜像版核心调度器
+		go CoreSchedulerLibrary()
+	} else {
+		go CoreScheduler()
+	}
+
 	fmt.Println("[+] CoreScheduler startup")
 	// 启动RepoInfo爬取调度器
 	go RepoScheduler()
@@ -100,21 +110,56 @@ func CoreScheduler() {
 	}
 }
 
+// CoreSchedulerLibrary 专用于官方镜像的爬取。
+//
+// 核心调度包括：
+//
+// 将keyword分发给ScrapeRegRepoListRecursive，生成下一个keyword，爬取当前keyword的仓库列表。
+//
+// 将regrepolist分发给ScrapeRepoInfo，爬取仓库metadata，爬取仓库所有tag的所有arch history。
+func CoreSchedulerLibrary() {
+	go func() { ScrapeRegRepoListRecursive("", "library") }()
+	for rrl := range chanRegRepoList {
+		chanLimitMainGoroutine <- struct{}{}
+		go func(rrl RegisterRepoList__) {
+			defer func() { <-chanLimitMainGoroutine }()
+			for _, s := range rrl.Summaries {
+				if s.Source == "library" {
+					chanRegName <- s.Name
+				}
+			}
+		}(rrl)
+	}
+}
+
 // RepoScheduler 专用于处理repository，调用ScrapeRepoInfo，有的时候页数有限，没能充分发挥多线程的魅力
 func RepoScheduler() {
-	for {
-		select {
-		case s := <-chanRegName:
-			chanRegLimit <- struct{}{}
-			go func(rname string) {
-				defer func() { <-chanRegLimit }()
-				ns := strings.Split(rname, "/")
-				if len(ns) != 2 {
-					return
-				}
-				namespace, repository := ns[0], ns[1]
-				ScrapeRepoInfo(namespace, repository)
-			}(s)
+	if libraryFlag {
+		for {
+			select {
+			case s := <-chanRegName:
+				chanRegLimit <- struct{}{}
+				go func(rname string) {
+					defer func() { <-chanRegLimit }()
+					ScrapeRepoInfo("library", s)
+				}(s)
+			}
+		}
+	} else {
+		for {
+			select {
+			case s := <-chanRegName:
+				chanRegLimit <- struct{}{}
+				go func(rname string) {
+					defer func() { <-chanRegLimit }()
+					ns := strings.Split(rname, "/")
+					if len(ns) != 2 {
+						return
+					}
+					namespace, repository := ns[0], ns[1]
+					ScrapeRepoInfo(namespace, repository)
+				}(s)
+			}
 		}
 	}
 }
