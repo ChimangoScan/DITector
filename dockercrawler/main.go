@@ -4,6 +4,7 @@ import (
 	"buildgraph"
 	"crawler"
 	"flag"
+	"os"
 )
 
 func main() {
@@ -16,7 +17,7 @@ func main() {
 		format string // 爬虫存储格式/信息库从什么格式中取内容，json、mysql
 	)
 
-	flag.StringVar(&crawl, "crawl", "", "register to crawl, e.g. dockerhub")
+	flag.StringVar(&crawl, "crawl", "", "crawl the register if not nil, e.g. dockerhub")
 	flag.BoolVar(&libraryFlag, "official", false, "true for crawling official images; false for crawling community images")
 	flag.BoolVar(&buildGraph, "build-graph", false, "true for building graph based on crawler results")
 	flag.StringVar(&format, "format", "json", "format for crawling or building graph, e.g. json, mysql")
@@ -27,8 +28,9 @@ func main() {
 			crawler.StartRecursive(format, libraryFlag)
 		}
 	} else if buildGraph {
-		if format == "json" {
-			buildgraph.BuildFromJSON()
-		}
+		buildgraph.Build(format)
+	} else {
+		flag.Usage()
+		os.Exit(-1)
 	}
 }
