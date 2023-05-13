@@ -41,7 +41,7 @@ func ReadFileRepositoryByLine() {
 			fmt.Println("[ERROR] json.Unmarshal failed with: ", err)
 			continue
 		}
-		fmt.Println(repo.Namespace, repo.Name)
+		chanRepository <- repo
 	}
 }
 
@@ -70,7 +70,7 @@ func ReadFileTagsByLine() {
 			fmt.Println("[ERROR] json.Unmarshal failed with: ", err)
 			continue
 		}
-		fmt.Println(tag.Namespace, tag.Repository, tag.Name)
+		chanTag <- tag
 	}
 }
 
@@ -99,6 +99,6 @@ func ReadFileImagesByLine() {
 			fmt.Println("[ERROR] json.Unmarshal failed with: ", err)
 			continue
 		}
-		fmt.Println(image.Namespace, image.Repository, image.Tag, image.Arch.Digest)
+		chanImage <- image
 	}
 }

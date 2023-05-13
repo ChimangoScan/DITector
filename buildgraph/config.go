@@ -1,8 +1,11 @@
 package buildgraph
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"os"
 	"path"
@@ -43,6 +46,20 @@ func config(format string) {
 
 	// 初始化限制最大goroutine数的全局管道
 	chanLimitMainGoroutine = make(chan struct{}, ConfigBuilder.MaxThread)
+
+	// 初始化数据库connector
+	// Mongo
+	mongoOptions := options.Client().ApplyURI("mongodb://localhost:27017")
+	mongoClient, err = mongo.Connect(context.Background(), mongoOptions)
+	if err != nil {
+		log.Fatalln("[ERROR] Failed to connect to MongoDB with err: ", err)
+	}
+	err = mongoClient.Ping(context.Background(), nil)
+	if err != nil {
+		log.Fatalln("[ERROR] Failed to ping MongoDB with err: ", err)
+	}
+	mongoRepositoryCollection = mongoClient.Database("dockerhub").Collection("repository")
+	fmt.Println("[+] Connect to MongoDB succeed")
 
 	// 根据format连接数据源
 	switch format {
