@@ -39,12 +39,6 @@ func StoreRepositoryScheduler() {
 	for repo := range chanRepository {
 		//fmt.Println(repo.Namespace, repo.RepositorySource, repo.Tags)
 		InsertRepositoryToMongo(repo)
-		//r, e := FindRepositoryFromMongoByName(repo.Namespace, repo.RepositorySource)
-		//if e != nil {
-		//	fmt.Println(e)
-		//} else {
-		//	fmt.Println("Find: ", *r)
-		//}
 	}
 	chanDoneRepository <- struct{}{}
 }
@@ -62,6 +56,7 @@ func StoreImageScheduler() {
 	for image := range chanImage {
 		//fmt.Println(image.Namespace, image.RepositorySource, image.ArchSource.Digest)
 		InsertImageToMongo(image)
+		InsertImageToNeo4j(image)
 		//fmt.Sprintf(image.Tag)
 	}
 	chanDoneImage <- struct{}{}

@@ -1,10 +1,17 @@
 {
   "max_thread": 0,
-  "local_proxy": false,
-  "proxy_file": "crawler/proxyaddr.json",
   "data_dir": "/mysql/json-files",
-  "builder_log_file": "builder.log",
   "repository_file": "library-repository.json",
   "tags_file": "library-tags.json",
-  "images_file": "library-images.json"
+  "images_file": "library-images.json",
+  "crawler": {
+    "local_proxy": false,
+    "proxy_file": "crawler/proxyaddr.json",
+    "mysql_uri": ""
+  },
+  "builder": {
+    "neo4j_uri": "neo4j://localhost:7687",
+    "neo4j_username": "neo4j",
+    "neo4j_password": "qazwsxedc"
+  }
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -19,7 +20,13 @@ var ConfigBuilder struct {
 	RepositoryFile string `json:"repository_file"`
 	TagsFile       string `json:"tags_file"`
 	ImagesFile     string `json:"images_file"`
-	BuilderLogFile string `json:"builder_log_file"`
+	Builder        URIS   `json:"builder"`
+}
+
+type URIS struct {
+	Neo4jURI      string `json:"neo4j_uri"`
+	Neo4jUsername string `json:"neo4j_username"`
+	Neo4jPassword string `json:"neo4j_password"`
 }
 
 func config(format string) {
@@ -54,11 +61,11 @@ func config(format string) {
 	mongoOptions := options.Client().ApplyURI("mongodb://localhost:27017")
 	mongoClient, err = mongo.Connect(context.Background(), mongoOptions)
 	if err != nil {
-		log.Fatalln("[ERROR] Failed to connect to MongoDB with err: ", err)
+		log.Fatalln("[ERROR] Connect to MongoDB failed with err: ", err)
 	}
 	err = mongoClient.Ping(context.Background(), nil)
 	if err != nil {
-		log.Fatalln("[ERROR] Failed to ping MongoDB with err: ", err)
+		log.Fatalln("[ERROR] Ping MongoDB failed with err: ", err)
 	}
 	mongoRepositoryCollection = mongoClient.Database("dockerhub").Collection("repository")
 	// 建立唯一索引，防止插入重复数据
@@ -76,7 +83,15 @@ func config(format string) {
 	}
 	fmt.Println("[+] Connect to MongoDB succeed")
 
-	// TODO: 初始化neo4j connector，建立节点唯一索引，防止重复插入layerid
+	// Neo4j
+	neo4jDriver, err = neo4j.NewDriverWithContext(
+		ConfigBuilder.Builder.Neo4jURI,
+		neo4j.BasicAuth(ConfigBuilder.Builder.Neo4jUsername, ConfigBuilder.Builder.Neo4jPassword, ""),
+	)
+	if err != nil {
+		log.Fatalln("[ERROR] Connect to neo4j failed with:", err)
+	}
+	fmt.Println("[+] Connect to Neo4j succeed")
 
 	// 根据format连接数据源
 	switch format {
@@ -111,10 +126,10 @@ func config(format string) {
 	}
 
 	// 初始化日志文件fd
-	fileBuilderLogger, err = os.OpenFile(path.Join(ConfigBuilder.DataDir, ConfigBuilder.BuilderLogFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	fileBuilderLogger, err = os.OpenFile(path.Join(ConfigBuilder.DataDir, "builder.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
-		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigBuilder.DataDir, ConfigBuilder.BuilderLogFile), err)
+		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigBuilder.DataDir, "builder.log"), err)
 	} else {
-		fmt.Println("[+] Open log file succeed: ", path.Join(ConfigBuilder.DataDir, ConfigBuilder.BuilderLogFile))
+		fmt.Println("[+] Open log file succeed: ", path.Join(ConfigBuilder.DataDir, "builder.log"))
 	}
 }

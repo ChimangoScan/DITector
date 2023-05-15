@@ -6,8 +6,11 @@ import (
 
 func Build(format string) {
 	config(format)
-	defer mongoClient.Disconnect(context.Background())
-
+	defer func() {
+		mongoClient.Disconnect(context.Background())
+		neo4jDriver.Close(context.TODO())
+	}()
+	return
 	switch format {
 	case "json":
 		BuildFromJSON()
