@@ -91,6 +91,24 @@ func config(format string) {
 	if err != nil {
 		log.Fatalln("[ERROR] Connect to neo4j failed with:", err)
 	}
+	// 创建索引，neo4j没有提供判断重复创建索引导致报错的函数，所以不处理err
+	session := neo4jDriver.NewSession(context.Background(), neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(context.Background())
+	session.ExecuteWrite(context.Background(), func(tx neo4j.ManagedTransaction) (any, error) {
+		// 创建索引：基于节点id
+		tx.Run(context.Background(),
+			"CREATE INDEX layer_id_index FOR (l:Layer) ON (l.id)",
+			map[string]any{},
+		)
+
+		// 创建索引：基于节点layer-id
+		tx.Run(context.Background(),
+			"CREATE INDEX layer_digest_index FOR (l:layer) ON (l.digest)",
+			map[string]any{},
+		)
+
+		return nil, nil
+	})
 	fmt.Println("[+] Connect to Neo4j succeed")
 
 	// 根据format连接数据源
@@ -120,6 +138,7 @@ func config(format string) {
 	case "clear":
 		// 删除数据库中的数据
 		DropRepositoryCollectionFromMongo()
+		DropNodesAndRelationshipsFromNeo4j()
 	default:
 		fmt.Println("[ERROR] Invalid data source configured: ", format)
 		os.Exit(-2)

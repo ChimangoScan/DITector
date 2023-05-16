@@ -22,8 +22,8 @@ func InsertRepositoryToMongo(repo *Repository) {
 			fmt.Println("[WARN] Duplicate when inserting repository", repo.Namespace, repo.Repository, ", repository already exists")
 			return
 		}
-		logBuilderString("[ERROR] Insert repository" + repo.Namespace + repo.Repository + "failed with: " + err.Error())
-		fmt.Println("[ERROR] Insert repository"+repo.Namespace+repo.Repository+"failed with: ", err)
+		logBuilderString("[ERROR] Insert repository " + repo.Namespace + repo.Repository + " to Mongo failed with: " + err.Error())
+		fmt.Println("[ERROR] Insert repository "+repo.Namespace+repo.Repository+" to Mongo failed with: ", err)
 		return
 	}
 	//fmt.Println("[INFO] Insert repository", repo.Namespace+"/"+repo.Repository, "succeed with ID", ret.InsertedID)
@@ -51,6 +51,7 @@ func InsertTagToMongo(tag *TagSource) {
 	}
 	_, err := mongoRepositoryCollection.UpdateOne(context.TODO(), filter, update)
 	if err != nil {
+		logBuilderString("[ERROR] Update tag " + tag.Namespace + "/" + tag.Repository + ":" + tag.Tag + " to Mongo failed with: " + err.Error())
 		fmt.Println("[ERROR] Update tag", tag.Namespace+"/"+tag.Repository+":"+tag.Tag, "failed with:", err)
 		return
 	}
@@ -71,6 +72,7 @@ func InsertImageToMongo(image *ImageSource) {
 	}
 	_, err := mongoRepositoryCollection.UpdateOne(context.TODO(), filter, update)
 	if err != nil {
+		logBuilderString("[ERROR] Update image " + image.Namespace + "/" + image.Repository + ":" + image.Tag + " to Mongo failed with: " + err.Error())
 		fmt.Println("[ERROR] Update image", image.Namespace+"/"+image.Repository+":"+image.Tag, "failed with:", err)
 		return
 	}
