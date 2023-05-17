@@ -11,13 +11,18 @@ import (
 )
 
 var ConfigCrawler struct {
-	MaxThread      int    `json:"max_thread"`
-	LocalProxy     bool   `json:"local_proxy"`
-	ProxyFile      string `json:"proxy_file"`
-	DataDir        string `json:"data_dir"`
-	RepositoryFile string `json:"repository_file"`
-	TagsFile       string `json:"tags_file"`
-	ImagesFile     string `json:"images_file"`
+	MaxThread      int           `json:"max_thread"`
+	DataDir        string        `json:"data_dir"`
+	RepositoryFile string        `json:"repository_file"`
+	TagsFile       string        `json:"tags_file"`
+	ImagesFile     string        `json:"images_file"`
+	PrivateConfig  PrivateConfig `json:"crawler"`
+}
+
+type PrivateConfig struct {
+	LocalProxy bool   `json:"local_proxy"`
+	ProxyFile  string `json:"proxy_file"`
+	MysqlDSN   string `json:"mysql_dsn"`
 }
 
 var Proxies struct {
@@ -76,7 +81,7 @@ func config(format string) {
 
 	db.InitDB(format)
 	// 初始化数据库连接
-	dockerDB, err = db.NewDockerDB("docker:docker@/dockerhub")
+	dockerDB, err = db.NewDockerDB(ConfigCrawler.PrivateConfig.MysqlDSN)
 	if err != nil {
 		log.Fatalln("[ERROR] Open mysql database failed with: ", err)
 	}
@@ -109,12 +114,12 @@ func config(format string) {
 	}
 
 	// 初始化go colly Proxies
-	if ConfigCrawler.LocalProxy {
+	if ConfigCrawler.PrivateConfig.LocalProxy {
 		// 获取proxy文件位置
-		proxyFile := root + "/" + ConfigCrawler.ProxyFile
+		proxyFile := root + "/" + ConfigCrawler.PrivateConfig.ProxyFile
 		ps, _ := os.ReadFile(proxyFile)
 		if err = json.Unmarshal(ps, &Proxies); err != nil {
-			fmt.Println("[ERROR] Json unmarshal failed while parsing proxyaddr file: ", ConfigCrawler.ProxyFile)
+			fmt.Println("[ERROR] Json unmarshal failed while parsing proxyaddr file: ", ConfigCrawler.PrivateConfig.ProxyFile)
 		} else {
 			fmt.Println("[+] Init Proxies From Local Success: ", Proxies)
 		}

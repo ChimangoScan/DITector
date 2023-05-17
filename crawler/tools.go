@@ -69,7 +69,7 @@ func GenerateNextKeyword(curr string, flg bool) string {
 // GetHTTPSProxy 从Proxies中随机返回一个代理
 func GetHTTPSProxy() string {
 	var p []string
-	if ConfigCrawler.LocalProxy {
+	if ConfigCrawler.PrivateConfig.LocalProxy {
 		p = Proxies.Addresses
 	} else {
 		// 目前用于快代理

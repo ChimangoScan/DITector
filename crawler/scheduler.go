@@ -41,7 +41,7 @@ func StartRecursive(format string, library bool) {
 	libraryFlag = library
 
 	// 从服务商获取IP代理，启动代理监视器，这里目前是快代理
-	if !ConfigCrawler.LocalProxy {
+	if !ConfigCrawler.PrivateConfig.LocalProxy {
 		go KDLProxiesMaintainer()
 		fmt.Println("[+] KDLProxiesMaintainer startup")
 	}

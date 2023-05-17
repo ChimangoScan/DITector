@@ -6,3 +6,5 @@ crawler/proxyaddr.json
 */go.sum
 secret.json
 .secret
+
+test.json

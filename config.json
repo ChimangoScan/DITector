@@ -7,7 +7,7 @@
   "crawler": {
     "local_proxy": false,
     "proxy_file": "crawler/proxyaddr.json",
-    "mysql_uri": ""
+    "mysql_dsn": "docker:docker@/dockerhub"
   },
   "builder": {
     "neo4j_uri": "neo4j://localhost:7687",

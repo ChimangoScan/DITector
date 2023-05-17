@@ -11,7 +11,11 @@ and the layers of each architecture of each tag, etc.
 
 项目需求环境较为复杂，需要提前配置以下环境：
 
-配置mysql数据库环境，并为mysql数据库创建新用户docker，密码docker。
+配置Mysql数据库环境，并为Mysql数据库创建新用户docker，密码docker。
+
+配置MongoDB数据库环境。
+
+配置Neo4j数据库环境。
 
 由于项目涉密需求，本项目并未开源到任何平台，因此需要先配置go workspace，在将本项目的go模块注册到本地工作空间中。具体步骤如下：
 
@@ -54,8 +58,8 @@ Docker Hub有访问频率限制：每个IP地址 180次/某时间段, DockerCraw
 ```json
 {
   "proxies": [
-    "proxyaddr1.com",
-    "proxyaddr2.com",
+    "proxyaddr1:port1",
+    "proxyaddr2:port2",
     "..."
   ]
 }
