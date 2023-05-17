@@ -23,6 +23,11 @@ func InsertImageToNeo4j(image *ImageSource) {
 	// 用于堆1、1-2、1-2-5，方便直接计算hash
 	previousHash := ""
 	accumulateLayerID := ""
+	accumulateHash := ""
+
+	// 一些基本赋值
+	lastLayerIndex := 0
+	imageName := image.Namespace + "/" + image.Repository + ":" + image.Tag
 
 	for i, _ := range image.Image.Layers {
 		// 跳过没有文件内容的层
@@ -30,16 +35,11 @@ func InsertImageToNeo4j(image *ImageSource) {
 			continue
 		}
 
-		// 一些基本赋值
-		imageName := image.Namespace + "/" + image.Repository + ":" + image.Tag
-
 		// 计算hash(1-2-5)，转成string类型
 		curLayer := image.Image.Layers[i]
 		layerID := curLayer.Digest[7:]
 		accumulateLayerID += layerID
-		accumulateHash := calSha256(accumulateLayerID)
-
-		// TODO: 实现neo4j插入
+		accumulateHash = calSha256(accumulateLayerID)
 
 		// 插入层及层间的边
 		_, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, previousHash, accumulateHash, curLayer))
@@ -49,18 +49,17 @@ func InsertImageToNeo4j(image *ImageSource) {
 			break
 		}
 
-		// 最后一层，需要将image信息加入到节点属性中
-		if i == len(image.Image.Layers)-1 {
-			_, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imageName, accumulateHash))
-			if err != nil {
-				logBuilderString(fmt.Sprintf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+layerID+" to neo4j failed with: %s", err))
-				fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+layerID+" to neo4j failed with: %s\n", err)
-				break
-			}
-		}
-
 		// 更新previousHash，下一轮插入节点的父节点ID应为previousHash
 		previousHash = accumulateHash
+		// 记录最后一层的index，
+		lastLayerIndex = i
+	}
+
+	// 需要将image信息加入到节点属性中
+	_, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imageName, accumulateHash))
+	if err != nil {
+		logBuilderString(fmt.Sprintf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+string(lastLayerIndex)+" to neo4j failed with: %s", err))
+		fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+string(lastLayerIndex)+" to neo4j failed with: %s\n", err)
 	}
 }
 
@@ -113,9 +112,10 @@ func addImageToLayerFunc(ctx context.Context, imageName, idHash string) neo4j.Ma
 
 	return func(tx neo4j.ManagedTransaction) (any, error) {
 		var result, err = tx.Run(ctx,
-			"MATCH (l:Layer {id: $idHash})"+
-				"SET l.images=l.images+$imageName",
-			map[string]any{"idHash": idHash, "imageName": imageName},
+			"MATCH (l:Layer {id: $idHash}) "+
+				"WHERE NOT $imageInfo IN l.images "+
+				"SET l.images=l.images+$imageInfo",
+			map[string]any{"idHash": idHash, "imageInfo": imageName},
 		)
 
 		if err != nil {

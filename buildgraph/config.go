@@ -139,6 +139,7 @@ func config(format string) {
 		// 删除数据库中的数据
 		DropRepositoryCollectionFromMongo()
 		DropNodesAndRelationshipsFromNeo4j()
+		logBuilderString("[WARN] Clear Database Mongo and Neo4j")
 	default:
 		fmt.Println("[ERROR] Invalid data source configured: ", format)
 		os.Exit(-2)

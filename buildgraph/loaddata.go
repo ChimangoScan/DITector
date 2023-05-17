@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 // 面向JSON数据源的接口
@@ -25,6 +26,8 @@ func ReadFileRepositoryByLine() {
 		fileRepository.Close()
 		close(chanRepository)
 	}()
+
+	beginTime := time.Now()
 
 	// 逐行读取文件内容直到EOF或其他错误
 	scanner := bufio.NewReader(fileRepository)
@@ -48,7 +51,13 @@ func ReadFileRepositoryByLine() {
 			continue
 		}
 		chanRepository <- repo
+
+		if i%1000 == 0 {
+			fmt.Println("File Repository Line", i, ", Total Time:", time.Since(beginTime))
+		}
 	}
+	fmt.Println("File Repository Final Line, Total Time:", time.Since(beginTime))
+	logBuilderString(fmt.Sprintf("[INFO] Load File Repository Finished, Total Time:%s", time.Since(beginTime)))
 }
 
 // ReadFileTagsByLine 用于逐行读取fileTags，并将结果转换为Tag
@@ -60,6 +69,8 @@ func ReadFileTagsByLine() {
 		fileTags.Close()
 		close(chanTag)
 	}()
+
+	beginTime := time.Now()
 
 	// 逐行读取文件内容直到EOF或其他错误
 	scanner := bufio.NewReader(fileTags)
@@ -83,7 +94,13 @@ func ReadFileTagsByLine() {
 			continue
 		}
 		chanTag <- tag
+
+		if i%1000 == 0 {
+			fmt.Println("File Tags Line", i, ", Total Time:", time.Since(beginTime))
+		}
 	}
+	fmt.Println("File Tags Final Line, Total Time:", time.Since(beginTime))
+	logBuilderString(fmt.Sprintf("[INFO] Load File Tags Finished, Total Time:%s", time.Since(beginTime)))
 }
 
 // ReadFileImagesByLine 用于逐行读取fileImages，并将结果转换为Image
@@ -95,6 +112,8 @@ func ReadFileImagesByLine() {
 		fileImages.Close()
 		close(chanImage)
 	}()
+
+	beginTime := time.Now()
 
 	// 逐行读取文件内容直到EOF或其他错误
 	scanner := bufio.NewReader(fileImages)
@@ -118,5 +137,11 @@ func ReadFileImagesByLine() {
 			continue
 		}
 		chanImage <- image
+
+		if i%1000 == 0 {
+			fmt.Println("File Images Line", i, ", Total Time:", time.Since(beginTime))
+		}
 	}
+	fmt.Println("File Images Final Line, Total Time:", time.Since(beginTime))
+	logBuilderString(fmt.Sprintf("[INFO] Load File Images Finished, Total Time:%s", time.Since(beginTime)))
 }
