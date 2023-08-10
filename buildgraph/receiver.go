@@ -3,17 +3,19 @@ package buildgraph
 // 用于json marshal和unmarshal的接收器模板
 
 type Repository struct {
-	User           string `json:"user"`
-	Repository     string `json:"name"`
-	Namespace      string `json:"namespace"`
-	RepositoryType string `json:"repository_type"`
-	IsPrivate      bool   `json:"is_private"`
-	IsAutomated    bool   `json:"is_automated"`
-	StarCount      int    `json:"star_count"`
-	PullCount      int64  `json:"pull_count"`
-	LastUpdated    string `json:"last_updated"`
-	DateRegistered string `json:"date_registered"`
-	Tags           map[string]Tag
+	User            string `json:"user"`
+	Repository      string `json:"name"`
+	Namespace       string `json:"namespace"`
+	RepositoryType  string `json:"repository_type"`
+	Description     string `json:"description"`
+	IsPrivate       bool   `json:"is_private"`
+	IsAutomated     bool   `json:"is_automated"`
+	StarCount       int    `json:"star_count"`
+	PullCount       int64  `json:"pull_count"`
+	LastUpdated     string `json:"last_updated"`
+	DateRegistered  string `json:"date_registered"`
+	FullDescription string `json:"full_description"`
+	Tags            map[string]Tag
 }
 
 type Tag struct {
@@ -35,8 +37,8 @@ type Image struct {
 	OS           string
 	Size         int64
 	Status       string
-	LastPulled   string
-	LastPushed   string
+	LastPulled   string `json:"last_pulled"`
+	LastPushed   string `json:"last_pushed"`
 }
 
 // 以Source结尾的struct用于从数据源中直接Unmarshal接收数据
@@ -53,7 +55,7 @@ type RepositorySource struct {
 	PullCount       int64  `json:"pull_count"`
 	LastUpdated     string `json:"last_updated"`
 	DateRegistered  string `json:"date_registered"`
-	FullDescription string `json:"full_description,omitempty"`
+	FullDescription string `json:"full_description"`
 }
 
 type TagSource struct {

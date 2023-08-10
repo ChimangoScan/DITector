@@ -20,7 +20,7 @@ func main() {
 	flag.StringVar(&crawl, "crawl", "", "crawl the register if not nil, e.g. dockerhub")
 	flag.BoolVar(&libraryFlag, "official", false, "true for crawling official images; false for crawling community images")
 	flag.BoolVar(&buildGraph, "build-graph", false, "true for building graph based on crawler results")
-	flag.StringVar(&format, "format", "json", "format for crawling or building graph, e.g. json, mysql")
+	flag.StringVar(&format, "format", "json", "format for crawling or building graph, e.g. json, mysql, clear")
 	flag.Parse()
 
 	if crawl != "" {

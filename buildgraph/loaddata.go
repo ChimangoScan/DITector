@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -31,7 +32,7 @@ func ReadFileRepositoryByLine() {
 
 	// 逐行读取文件内容直到EOF或其他错误
 	scanner := bufio.NewReader(fileRepository)
-	for i := 0; i < 10; i++ {
+	for i := 0; ; i++ {
 		b, err := scanner.ReadBytes('\n')
 		if err != nil {
 			// 读到fileRepository结尾，退出
@@ -74,7 +75,7 @@ func ReadFileTagsByLine() {
 
 	// 逐行读取文件内容直到EOF或其他错误
 	scanner := bufio.NewReader(fileTags)
-	for i := 0; i < 10; i++ {
+	for i := 0; ; i++ {
 		b, err := scanner.ReadBytes('\n')
 		if err != nil {
 			// 读到fileTags结尾，退出
@@ -83,6 +84,7 @@ func ReadFileTagsByLine() {
 				break
 			}
 			fmt.Println("[ERROR] Fail to ReadLine in ReadFileTagsByLine: Line ", i, ", err: ", err)
+			logBuilderString("[ERROR] Fail to ReadLine in ReadFileTagsByLine: Line " + strconv.Itoa(i) + ", err: " + err.Error())
 			break
 		}
 
@@ -117,7 +119,7 @@ func ReadFileImagesByLine() {
 
 	// 逐行读取文件内容直到EOF或其他错误
 	scanner := bufio.NewReader(fileImages)
-	for i := 0; i < 10; i++ {
+	for i := 0; ; i++ {
 		b, err := scanner.ReadBytes('\n')
 		if err != nil {
 			// 读到文件结尾，退出

@@ -67,10 +67,10 @@ func config(format string) {
 	if err != nil {
 		log.Fatalln("[ERROR] Ping MongoDB failed with err: ", err)
 	}
-	// mongoRepositoryCollection 用于存repository的元数据
-	mongoRepositoryCollection = mongoClient.Database("dockerhub").Collection("repository")
+	// mongoRepositoriesCollection 用于存repository的元数据
+	mongoRepositoriesCollection = mongoClient.Database("dockerhub").Collection("repositories")
 	// 建立唯一索引，namespace-repository防止插入重复数据
-	repoIndexView := mongoRepositoryCollection.Indexes()
+	repoIndexView := mongoRepositoriesCollection.Indexes()
 	repoModel := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "namespace", Value: 1},
@@ -132,6 +132,14 @@ func config(format string) {
 	})
 	fmt.Println("[+] Connect to Neo4j succeed")
 
+	// 初始化日志文件fd
+	fileBuilderLogger, err = os.OpenFile(path.Join(ConfigBuilder.DataDir, "builder.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	if err != nil {
+		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigBuilder.DataDir, "builder.log"), err)
+	} else {
+		fmt.Println("[+] Open log file succeed: ", path.Join(ConfigBuilder.DataDir, "builder.log"))
+	}
+
 	// 根据format连接数据源
 	switch format {
 	case "json":
@@ -160,17 +168,10 @@ func config(format string) {
 		// 删除数据库中的数据
 		DropRepositoryCollectionFromMongo()
 		DropNodesAndRelationshipsFromNeo4j()
-		logBuilderString("[WARN] Clear Database Mongo and Neo4j")
+		fmt.Println("[-] clean data from MongoDB and Neo4j")
+		logBuilderString("[WARN] Clean Database Mongo and Neo4j")
 	default:
 		fmt.Println("[ERROR] Invalid data source configured: ", format)
 		os.Exit(-2)
-	}
-
-	// 初始化日志文件fd
-	fileBuilderLogger, err = os.OpenFile(path.Join(ConfigBuilder.DataDir, "builder.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
-	if err != nil {
-		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigBuilder.DataDir, "builder.log"), err)
-	} else {
-		fmt.Println("[+] Open log file succeed: ", path.Join(ConfigBuilder.DataDir, "builder.log"))
 	}
 }

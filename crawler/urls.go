@@ -4,7 +4,7 @@ import "fmt"
 
 const (
 	RegURLTemplate          = `https://hub.docker.com/api/content/v1/products/search?q=%s&source=%s&page=%s&page_size=%s`
-	NamespaceURLTemplate    = `https://hub.docker.com/v2/repositories/%s?pace=%s&page_size=%s&ordering=last_updated`
+	NamespaceURLTemplate    = `https://hub.docker.com/v2/repositories/%s?page=%s&page_size=%s&ordering=last_updated`
 	RepoMetaURLTemplate     = `https://hub.docker.com/v2/repositories/%s/%s/`
 	RepoTagsURLTemplate     = `https://hub.docker.com/v2/repositories/%s/%s/tags/?page=%s&page_size=%s&name&ordering`
 	ImageMetaURLTemplate    = `https://hub.docker.com/v2/repositories/%s/%s/tags/%s`

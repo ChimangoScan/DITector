@@ -11,13 +11,13 @@ import (
 // mongo.go 用于操作mongodb
 
 var mongoClient *mongo.Client
-var mongoRepositoryCollection *mongo.Collection
+var mongoRepositoriesCollection *mongo.Collection
 var mongoImagesCollection *mongo.Collection
 
 // InsertRepositoryToMongo 利用Insert将Repository作为文档存储到Mongo中
 func InsertRepositoryToMongo(repo *Repository) {
 	repo.Tags = map[string]Tag{}
-	_, err := mongoRepositoryCollection.InsertOne(context.Background(), repo)
+	_, err := mongoRepositoriesCollection.InsertOne(context.Background(), repo)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			//fmt.Println("[WARN] Mongo Duplicate when inserting repository", repo.Namespace, repo.Repository, ", repository already exists")
@@ -50,7 +50,7 @@ func InsertTagToMongo(tag *TagSource) {
 	update := bson.M{
 		"$set": bson.M{"tags." + tagKey: t},
 	}
-	_, err := mongoRepositoryCollection.UpdateOne(context.TODO(), filter, update)
+	_, err := mongoRepositoriesCollection.UpdateOne(context.TODO(), filter, update)
 	if err != nil {
 		logBuilderString("[ERROR] Mongo Update tag " + tag.Namespace + "/" + tag.Repository + ":" + tag.Tag + " failed with: " + err.Error())
 		fmt.Println("[ERROR] Mongo Update tag", tag.Namespace+"/"+tag.Repository+":"+tag.Tag, "failed with:", err)
@@ -84,7 +84,7 @@ func AddImageToRepositoryMongo(image *ImageSource) {
 	update := bson.M{
 		"$set": bson.M{"tags." + tagKey + ".images." + arch + "." + variant: image.Image.Digest},
 	}
-	_, err := mongoRepositoryCollection.UpdateOne(context.TODO(), filter, update)
+	_, err := mongoRepositoriesCollection.UpdateOne(context.TODO(), filter, update)
 	if err != nil {
 		logBuilderString("[ERROR] Mongo Update image " + image.Namespace + "/" + image.Repository + ":" + image.Tag + " failed with: " + err.Error())
 		fmt.Println("[ERROR] Mongo Update image", image.Namespace+"/"+image.Repository+":"+image.Tag, "failed with:", err)
@@ -109,7 +109,7 @@ func InsertImageToImagesCollectionMongo(image *ImageSource) {
 	//fmt.Println("[INFO] Insert image", i.Digest, "succeed with ID", ret.UpsertedID)
 }
 
-// FindRepositoryFromMongoByName 根据Namespace、Repository寻找MongoDB中存储的Repository
+// FindRepositoryFromMongoByName 根据Namespace、Repository寻找mongo.dockerhub.repository中存储的Repository
 func FindRepositoryFromMongoByName(namespace, repository string) (*Repository, error) {
 	var repo = new(Repository)
 
@@ -123,17 +123,35 @@ func FindRepositoryFromMongoByName(namespace, repository string) (*Repository, e
 	}
 
 	// 查询并返回结果
-	err := mongoRepositoryCollection.FindOne(context.Background(), filter).Decode(repo)
+	err := mongoRepositoriesCollection.FindOne(context.Background(), filter).Decode(repo)
 	if err != nil {
 		return &Repository{}, err
 	}
 	return repo, err
 }
 
+// FindImageFromMongoByDigest 根据Digest寻找mongo.dockerhub.images中存储的Image
+func FindImageFromMongoByDigest(digest string) (*Image, error) {
+	var img = new(Image)
+
+	// 传入条件
+	filter := bson.M{}
+	if digest != "" {
+		filter["digest"] = digest
+	}
+
+	// 查询并返回结果
+	err := mongoImagesCollection.FindOne(context.Background(), filter).Decode(img)
+	if err != nil {
+		return &Image{}, err
+	}
+	return img, err
+}
+
 // CountDocumentsFromMongo 统计已经存入的文档数量（repository数量）
 func CountDocumentsFromMongo() int {
 	filter := bson.M{}
-	cursor, _ := mongoRepositoryCollection.Find(context.TODO(), filter)
+	cursor, _ := mongoRepositoriesCollection.Find(context.TODO(), filter)
 	defer cursor.Close(context.TODO())
 
 	var docs []RepositorySource
@@ -143,7 +161,8 @@ func CountDocumentsFromMongo() int {
 
 // DropRepositoryCollectionFromMongo 将repository collection从mongo删除
 func DropRepositoryCollectionFromMongo() error {
-	mongoRepositoryCollection.Drop(context.TODO())
+	mongoRepositoriesCollection.Drop(context.TODO())
 	mongoImagesCollection.Drop(context.TODO())
+	logBuilderString("[WARN] drop collections: repository, images from MongoDB")
 	return nil
 }

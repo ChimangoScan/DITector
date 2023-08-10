@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"strconv"
 )
 
 // neo4j.go 用于操作neo4j
@@ -55,8 +56,8 @@ func InsertImageToNeo4j(image *ImageSource) {
 	// 需要将image信息加入到节点属性中
 	_, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imageName, accumulateHash))
 	if err != nil {
-		logBuilderString(fmt.Sprintf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+string(lastLayerIndex)+" to neo4j failed with: %s", err))
-		fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+string(lastLayerIndex)+" to neo4j failed with: %s\n", err)
+		logBuilderString(fmt.Sprintf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s", err))
+		fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.Repository+":"+image.Tag+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s\n", err)
 	}
 }
 
@@ -159,4 +160,6 @@ func DropNodesAndRelationshipsFromNeo4j() {
 
 		return nil, nil
 	})
+
+	logBuilderString("[WARN] clean all data from neo4j")
 }
