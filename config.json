@@ -1,9 +1,9 @@
 {
   "max_thread": 0,
   "data_dir": "/mysql/json-files",
-  "repository_file": "library-repository.json",
-  "tags_file": "library-tags.json",
-  "images_file": "library-images.json",
+  "repository_file": "repository.json",
+  "tags_file": "tags.json",
+  "images_file": "images.json",
   "crawler": {
     "local_proxy": false,
     "proxy_file": "crawler/proxyaddr.json",

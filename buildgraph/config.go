@@ -163,7 +163,21 @@ func config(format string) {
 			fmt.Println("[+] Open source file succeed: ", path.Join(ConfigBuilder.DataDir, ConfigBuilder.ImagesFile))
 		}
 	case "mysql":
+		// deprecated: mysql性能低下
 		// 初始化mysql connector
+	case "count":
+		// 统计数据库信息并打印
+		fmt.Println("[+] get statistics of MongoDB and Neo4j")
+		statistics, err := CountDocumentsFromMongo()
+		if err != nil {
+			fmt.Println("[-] get document statistics failed with err:", err)
+		} else {
+			fmt.Println("-------------------------------------------------")
+			fmt.Println("MongoDB:")
+			for k, v := range statistics {
+				fmt.Println("\t", k, ":", v)
+			}
+		}
 	case "clear":
 		// 删除数据库中的数据
 		DropRepositoryCollectionFromMongo()

@@ -149,14 +149,27 @@ func FindImageFromMongoByDigest(digest string) (*Image, error) {
 }
 
 // CountDocumentsFromMongo 统计已经存入的文档数量（repository数量）
-func CountDocumentsFromMongo() int {
+func CountDocumentsFromMongo() (map[string]int64, error) {
+	res := make(map[string]int64)
 	filter := bson.M{}
-	cursor, _ := mongoRepositoriesCollection.Find(context.TODO(), filter)
-	defer cursor.Close(context.TODO())
 
-	var docs []RepositorySource
-	cursor.All(context.TODO(), &docs)
-	return len(docs)
+	repositoryCnt, err := mongoRepositoriesCollection.CountDocuments(context.TODO(), filter)
+	if err != nil {
+		logBuilderString("[ERROR] mongo count documents of repositories collection failed with err:", err.Error())
+		return res, err
+	} else {
+		res["repositories_cnt"] = repositoryCnt
+	}
+
+	imageCnt, err := mongoImagesCollection.CountDocuments(context.TODO(), filter)
+	if err != nil {
+		logBuilderString("[ERROR] mongo count documents of images collection failed with err:", err.Error())
+		return res, err
+	} else {
+		res["images_cnt"] = imageCnt
+	}
+
+	return res, nil
 }
 
 // DropRepositoryCollectionFromMongo 将repository collection从mongo删除

@@ -2,6 +2,7 @@ package buildgraph
 
 import (
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -13,8 +14,9 @@ var (
 	lockFileBuilderLogger = sync.Mutex{}
 )
 
-func logBuilderString(s string) {
+func logBuilderString(s ...string) {
 	lockFileBuilderLogger.Lock()
 	defer lockFileBuilderLogger.Unlock()
-	fileBuilderLogger.WriteString(time.Now().Add(8*time.Hour).Format(time.DateTime) + " " + s + "\n")
+	tmp := strings.Join(s, " ")
+	fileBuilderLogger.WriteString(time.Now().Add(8*time.Hour).Format(time.DateTime) + " " + tmp + "\n")
 }
