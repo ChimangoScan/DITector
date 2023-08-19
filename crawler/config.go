@@ -1,10 +1,10 @@
 package crawler
 
 import (
-	"db"
 	"encoding/json"
 	"fmt"
 	"log"
+	"mymysql"
 	"os"
 	"path"
 	"runtime"
@@ -48,7 +48,7 @@ var UserAgents = [...]string{
 	`Mozilla/5.0 (Windows; U; Windows NT 5.1; zh-CN) AppleWebKit/533.21.1 (KHTML, like Gecko) Version/5.0.5 Safari/533.21.1`,
 }
 
-var dockerDB *db.DockerDB
+var dockerDB *mymysql.DockerDB
 
 // config 配置crawler，原init()
 func config(format string) {
@@ -79,9 +79,9 @@ func config(format string) {
 	chanLimitMainGoroutine = make(chan struct{}, ConfigCrawler.MaxThread)
 	chanRegRepoList = make(chan RegisterRepoList__, ConfigCrawler.MaxThread)
 
-	db.InitDB(format)
+	mymysql.InitDB(format)
 	// 初始化数据库连接
-	dockerDB, err = db.NewDockerDB(ConfigCrawler.PrivateConfig.MysqlDSN)
+	dockerDB, err = mymysql.NewDockerDB(ConfigCrawler.PrivateConfig.MysqlDSN)
 	if err != nil {
 		log.Fatalln("[ERROR] Open mysql database failed with: ", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"myutils"
 	"os"
 	"strconv"
 	"time"
@@ -45,7 +46,7 @@ func ReadFileRepositoryByLine() {
 		}
 
 		// 解析内容，发到管道，等待scheduler调度
-		var repo = new(Repository)
+		var repo = new(myutils.Repository)
 		err = json.Unmarshal(b, repo)
 		if err != nil {
 			fmt.Println("[ERROR] json.Unmarshal failed with: ", err)
@@ -54,11 +55,11 @@ func ReadFileRepositoryByLine() {
 		chanRepository <- repo
 
 		if i%1000 == 0 {
-			fmt.Println("File Repository Line", i, ", Total Time:", time.Since(beginTime))
+			fmt.Println("File RepositoryName Line", i, ", Total Time:", time.Since(beginTime))
 		}
 	}
-	fmt.Println("File Repository Final Line, Total Time:", time.Since(beginTime))
-	logBuilderString(fmt.Sprintf("[INFO] Load File Repository Finished, Total Time:%s", time.Since(beginTime)))
+	fmt.Println("File RepositoryName Final Line, Total Time:", time.Since(beginTime))
+	myutils.LogDockerCrawlerString(fmt.Sprintf("[INFO] Load File RepositoryName Finished, Total Time:%s", time.Since(beginTime)))
 }
 
 // ReadFileTagsByLine 用于逐行读取fileTags，并将结果转换为Tag
@@ -84,12 +85,12 @@ func ReadFileTagsByLine() {
 				break
 			}
 			fmt.Println("[ERROR] Fail to ReadLine in ReadFileTagsByLine: Line ", i, ", err: ", err)
-			logBuilderString("[ERROR] Fail to ReadLine in ReadFileTagsByLine: Line " + strconv.Itoa(i) + ", err: " + err.Error())
+			myutils.LogDockerCrawlerString("[ERROR] Fail to ReadLine in ReadFileTagsByLine: Line " + strconv.Itoa(i) + ", err: " + err.Error())
 			break
 		}
 
 		// 解析内容，发到管道，等待scheduler调度
-		var tag = new(TagSource)
+		var tag = new(myutils.TagSource)
 		err = json.Unmarshal(b, tag)
 		if err != nil {
 			fmt.Println("[ERROR] json.Unmarshal failed with: ", err)
@@ -102,7 +103,7 @@ func ReadFileTagsByLine() {
 		}
 	}
 	fmt.Println("File Tags Final Line, Total Time:", time.Since(beginTime))
-	logBuilderString(fmt.Sprintf("[INFO] Load File Tags Finished, Total Time:%s", time.Since(beginTime)))
+	myutils.LogDockerCrawlerString(fmt.Sprintf("[INFO] Load File Tags Finished, Total Time:%s", time.Since(beginTime)))
 }
 
 // ReadFileImagesByLine 用于逐行读取fileImages，并将结果转换为Image
@@ -132,7 +133,7 @@ func ReadFileImagesByLine() {
 		}
 
 		// 解析内容，发到管道，等待scheduler调度
-		var image = new(ImageSource)
+		var image = new(myutils.ImageSource)
 		err = json.Unmarshal(b, image)
 		if err != nil {
 			fmt.Println("[ERROR] json.Unmarshal failed with: ", err)
@@ -145,5 +146,5 @@ func ReadFileImagesByLine() {
 		}
 	}
 	fmt.Println("File Images Final Line, Total Time:", time.Since(beginTime))
-	logBuilderString(fmt.Sprintf("[INFO] Load File Images Finished, Total Time:%s", time.Since(beginTime)))
+	myutils.LogDockerCrawlerString(fmt.Sprintf("[INFO] Load File Images Finished, Total Time:%s", time.Since(beginTime)))
 }

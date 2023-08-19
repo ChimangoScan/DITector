@@ -202,7 +202,7 @@ func ScrapeRepoInfo(namespace, repository string) {
 	//}
 	//// TODO: 后面要添加update数据库需要对修改
 	//if i, _ := res.RowsAffected(); i == 0 {
-	//	fmt.Printf("[WARN] Repository '%s' already exists.", namespace+"/"+repository)
+	//	fmt.Printf("[WARN] RepositoryName '%s' already exists.", namespace+"/"+repository)
 	//	//return
 	//} else {
 	//	fmt.Printf("[INFO] Insert repository '%s' success.\n", namespace+"/"+repository)

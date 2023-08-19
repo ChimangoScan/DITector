@@ -1,14 +1,10 @@
 package buildgraph
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
+	"myutils"
 	"os"
 	"path"
 	"runtime"
@@ -58,87 +54,31 @@ func config(format string) {
 
 	// 初始化数据库connector
 	// Mongo
-	mongoOptions := options.Client().ApplyURI("mongodb://localhost:27017")
-	mongoClient, err = mongo.Connect(context.Background(), mongoOptions)
+	mymongo, err = myutils.ConfigMongoClient()
 	if err != nil {
-		log.Fatalln("[ERROR] Connect to MongoDB failed with err: ", err)
-	}
-	err = mongoClient.Ping(context.Background(), nil)
-	if err != nil {
-		log.Fatalln("[ERROR] Ping MongoDB failed with err: ", err)
-	}
-	// mongoRepositoriesCollection 用于存repository的元数据
-	mongoRepositoriesCollection = mongoClient.Database("dockerhub").Collection("repositories")
-	// 建立唯一索引，namespace-repository防止插入重复数据
-	repoIndexView := mongoRepositoriesCollection.Indexes()
-	repoModel := mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "namespace", Value: 1},
-			{Key: "repository", Value: 1},
-		},
-		Options: options.Index().SetUnique(true),
-	}
-	_, err = repoIndexView.CreateOne(context.Background(), repoModel)
-	if err != nil {
-		log.Fatalln("[ERROR] Create unique index on mongodb.dockerhub.repository failed with:", err)
-	}
-	// mongoImagesCollection 用于存image的层信息
-	mongoImagesCollection = mongoClient.Database("dockerhub").Collection("images")
-	// 建立唯一索引digest，防止插入重复数据
-	imageIndexView := mongoImagesCollection.Indexes()
-	imageModel := mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "digest", Value: 1},
-		},
-		Options: options.Index().SetUnique(true),
-	}
-	_, err = imageIndexView.CreateOne(context.Background(), imageModel)
-	if err != nil {
-		log.Fatalln("[ERROR] Create unique index on mongodb.dockerhub.images failed with:", err)
+		log.Fatalln("[ERROR] connect to and config MongoDB failed with err: ", err)
 	}
 	fmt.Println("[+] Connect to MongoDB succeed")
 
 	// Neo4j
-	neo4jDriver, err = neo4j.NewDriverWithContext(
+	myNeo4jDriver, err = myutils.ConfigNewNeo4jDriverWithContext(
 		ConfigBuilder.Builder.Neo4jURI,
-		neo4j.BasicAuth(ConfigBuilder.Builder.Neo4jUsername, ConfigBuilder.Builder.Neo4jPassword, ""),
+		ConfigBuilder.Builder.Neo4jUsername,
+		ConfigBuilder.Builder.Neo4jPassword,
 	)
 	if err != nil {
 		log.Fatalln("[ERROR] Connect to neo4j failed with:", err)
 	}
-	// 创建索引，neo4j没有提供判断重复创建索引导致报错的函数，所以不处理err
-	session := neo4jDriver.NewSession(context.Background(), neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(context.Background())
-	session.ExecuteWrite(context.Background(), func(tx neo4j.ManagedTransaction) (any, error) {
-		// 创建索引：基于节点id
-		tx.Run(context.Background(),
-			"CREATE INDEX layer_id_index IF NOT EXISTS FOR (l:Layer) ON (l.id)",
-			map[string]any{},
-		)
-
-		// 创建索引：基于节点layer-id
-		tx.Run(context.Background(),
-			"CREATE INDEX layer_digest_index IF NOT EXISTS FOR (l:Layer) ON (l.digest)",
-			map[string]any{},
-		)
-
-		// 创建索引：基于节点layer-id
-		tx.Run(context.Background(),
-			"CREATE INDEX rawlayer_digest_index IF NOT EXISTS FOR (l:RawLayer) ON (l.digest)",
-			map[string]any{},
-		)
-
-		return nil, nil
-	})
 	fmt.Println("[+] Connect to Neo4j succeed")
 
+	// Deprecated
 	// 初始化日志文件fd
-	fileBuilderLogger, err = os.OpenFile(path.Join(ConfigBuilder.DataDir, "builder.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
-	if err != nil {
-		log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigBuilder.DataDir, "builder.log"), err)
-	} else {
-		fmt.Println("[+] Open log file succeed: ", path.Join(ConfigBuilder.DataDir, "builder.log"))
-	}
+	//myutils.fileBuilderLogger, err = os.OpenFile(path.Join(ConfigBuilder.DataDir, "builder.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
+	//if err != nil {
+	//	log.Fatalf("[ERROR] Open %s failed with: %s\n", path.Join(ConfigBuilder.DataDir, "builder.log"), err)
+	//} else {
+	//	fmt.Println("[+] Open log file succeed: ", path.Join(ConfigBuilder.DataDir, "builder.log"))
+	//}
 
 	// 根据format连接数据源
 	switch format {
@@ -168,7 +108,7 @@ func config(format string) {
 	case "count":
 		// 统计数据库信息并打印
 		fmt.Println("[+] get statistics of MongoDB and Neo4j")
-		statistics, err := CountDocumentsFromMongo()
+		statistics, err := mymongo.CountDocumentsFromMongo()
 		if err != nil {
 			fmt.Println("[-] get document statistics failed with err:", err)
 		} else {
@@ -180,10 +120,10 @@ func config(format string) {
 		}
 	case "clear":
 		// 删除数据库中的数据
-		DropRepositoryCollectionFromMongo()
-		DropNodesAndRelationshipsFromNeo4j()
+		mymongo.DropCollectionsFromMongo()
+		myNeo4jDriver.DropNodesAndRelationshipsFromNeo4j()
 		fmt.Println("[-] clean data from MongoDB and Neo4j")
-		logBuilderString("[WARN] Clean Database Mongo and Neo4j")
+		myutils.LogDockerCrawlerString("[WARN] Clean Database Mongo and Neo4j")
 	default:
 		fmt.Println("[ERROR] Invalid data source configured: ", format)
 		os.Exit(-2)

@@ -172,7 +172,7 @@ func GetRepoTagsCollector(ch chan TagReceiver__) *colly.Collector {
 	return c
 }
 
-// GetImageHistoryCollector 为爬取指定Namespace/Repository:tag Image的构建命令的Collector绑定回调函数。
+// GetImageHistoryCollector 为爬取指定Namespace/RepositoryName:tag Image的构建命令的Collector绑定回调函数。
 func GetImageHistoryCollector(Arch *[]Arch__) *colly.Collector {
 	c := GetDockerHubCollector()
 
