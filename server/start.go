@@ -6,6 +6,8 @@ import (
 )
 
 func StartServer() {
+	configServer(false)
+
 	router := gin.Default()
 
 	router.GET("/ping", func(c *gin.Context) {
@@ -13,6 +15,8 @@ func StartServer() {
 			"message": "pong",
 		})
 	})
+
+	router.GET("/images", handleImageSearch())
 
 	router.Run(":23434")
 }
