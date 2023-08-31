@@ -29,6 +29,15 @@ func TestConfigMongoClient(t *testing.T) {
 	fmt.Println(mymongo.ImagesCollection.Name())
 }
 
+func TestMyMongo_GetRepositoriesCountByText(t *testing.T) {
+	mymongo, _ := ConfigMongoClient(false)
+	cnt, err := mymongo.GetRepositoriesCountByText("")
+	if err != nil {
+		log.Fatalln(err)
+	}
+	fmt.Println(cnt)
+}
+
 func TestMyMongo_FindRepositoriesByText(t *testing.T) {
 	mymongo, _ := ConfigMongoClient(false)
 	results, err := mymongo.FindRepositoriesByText("library/mongo", 1, 10)

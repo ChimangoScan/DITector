@@ -24,6 +24,8 @@
                           :data="props.row.layers"
                           :row-class-name="tableRowClassName"
                   >
+<!--                      used for left white-->
+                      <el-table-column label="" width="50" />
                       <el-table-column prop="colId" label="Index" align="center" width="80" />
                       <el-table-column prop="instruction" label="Instruction" width="450" />
                       <el-table-column prop="size" label="Size" align="center" width="125" />
@@ -34,15 +36,24 @@
             </template>
         </el-table-column>
         <el-table-column fixed prop="digest" label="Digest" show-overflow-tooltip width="650" />
-        <el-table-column prop="architecture" label="Architecture" align="center" width="120" />
-        <el-table-column prop="features" label="Features" align="center" width="100" />
-        <el-table-column prop="variant" label="Variant" align="center" width="100" />
-        <el-table-column prop="os" label="OS" align="center" width="100" />
+        <el-table-column prop="architecture" label="Architecture" show-overflow-tooltip align="center" width="120" />
+        <el-table-column prop="features" label="Features" show-overflow-tooltip align="center" width="100" />
+        <el-table-column prop="variant" label="Variant" show-overflow-tooltip align="center" width="100" />
+        <el-table-column prop="os" label="OS" show-overflow-tooltip align="center" width="100" />
         <el-table-column prop="size" label="Size" align="center" width="125" />
         <el-table-column prop="status" label="Status" align="center" width="100" />
         <el-table-column prop="last_pulled" label="Last Pulled" align="center" width="240" />
         <el-table-column prop="last_pushed" label="Last Pushed" align="center" width="240" />
     </el-table>
+    <el-pagination
+            :currentPage="currentPage"
+            :page-sizes="[10, 20, 50]"
+            :page-size="pageSize"
+            layout=" prev, pager, next, jumper, sizes, total, "
+            :total="totalPages"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+    />
 </template>
 
 <script lang="ts" setup>
@@ -54,38 +65,71 @@ const tableRowClassName = ({row, rowIndex}) => {
     row.colId = rowIndex + 1;
 };
 
-const page = ref(1);
+const currentPage = ref(1);
 const pageSize = ref(20);
+const totalCnt = ref(0);    // total count of documents in response
+const totalPages = ref(0);  // total count of pages (totalCnt/pageSize + 1)
 const searchKeyword = ref('');
 const imagesData = ref([]);
 
 function handleSearchImages() {
   console.log("button clicked");
   // reset to page 1 before every search
-  page.value = 1;
-  getImagesData(searchKeyword.value, page.value, pageSize.value);
+  currentPage.value = 1;
+  fetchImagesData();
 }
 
-function getImagesData(search, page, pageSize) {
+function getImagesData(search, currentPage, pageSize) {
   // axios get images data responsed from backend API
   axios.get('http://10.10.21.122:23434/images', {
       params: {
           search: search,
-          page: page,
+          page: currentPage,
           page_size: pageSize
       }
   }).then(response => {
       imagesData.value = response.data['results'];
+      totalCnt.value = response.data['count'];
       // console.log(imagesData.value);
       // console.log(response.data);
+      recalculateTotalPages();
   })
   .catch(error => {
       console.log(error);
   });
 }
 
+function handleCurrentChange(val: number) {
+    currentPage.value = val;
+    console.log(currentPage.value);
+    fetchImagesData();
+}
+
+function handleSizeChange(val: number) {
+    // change pageSize
+    pageSize.value = val;
+    // recalculate totalPages
+    recalculateTotalPages();
+    console.log(pageSize.value);
+    fetchImagesData();
+}
+
+// recalculate TotalPages after totalCnt or pageSize changed
+function recalculateTotalPages() {
+    if (totalCnt.value === 0) {
+        totalPages.value = 0;
+    } else {
+        totalPages.value = Math.floor(totalCnt.value / pageSize.value + 1);
+    }
+}
+
+// fetch images data from backend with searchKeyword, currentPage and pageSize
+function fetchImagesData() {
+    getImagesData(searchKeyword.value, currentPage.value, pageSize.value);
+}
+
 // init web page
-getImagesData(searchKeyword.value, page.value, pageSize.value);
+fetchImagesData();
 </script>
 
 <style scoped>

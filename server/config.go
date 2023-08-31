@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"myutils"
+	"sync"
 )
 
 var (
@@ -14,6 +15,7 @@ var (
 	// used for calculate table pages
 	totalRepositoriesCnt int64
 	totalImagesCnt       int64
+	configLock           = sync.WaitGroup{}
 )
 
 func configServer(initFlag bool) {
@@ -29,12 +31,27 @@ func configServer(initFlag bool) {
 		log.Fatalln("[ERROR] Connect to neo4j failed with:", err)
 	}
 	fmt.Println("[+] Connect to Neo4j succeed")
-}
 
-func updateImageCnt() {
-
+	configLock.Add(2)
+	go func() {
+		defer configLock.Done()
+		updateRepositoriesCnt()
+	}()
+	go func() {
+		defer configLock.Done()
+		updateImagesCnt()
+	}()
+	configLock.Wait()
 }
 
 func updateRepositoriesCnt() {
+	//totalRepositoriesCnt, _ = myMongo.GetRepositoriesCountByText("")
+	totalRepositoriesCnt = 2576742
+	fmt.Println(totalRepositoriesCnt)
+}
 
+func updateImagesCnt() {
+	//totalImagesCnt, _ = myMongo.GetImagesCountByText("")
+	totalImagesCnt = 7111908
+	fmt.Println(totalImagesCnt)
 }

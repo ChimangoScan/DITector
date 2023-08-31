@@ -15,24 +15,46 @@
         max-height="700"
     >
         <!--        可收缩展开内容-->
-<!--        <el-table-column fixed type="expand">-->
-<!--            <template #default="props">-->
-<!--                <div>-->
-<!--                    <el-table-->
-<!--                        id="expanded-table"-->
-<!--                        highlight-current-row-->
-<!--                        :data="props.row.tags"-->
-<!--                        :row-class-name="tableRowClassName"-->
-<!--                    >-->
-<!--                        <el-table-column prop="colId" label="Index" align="center" width="80" />-->
-<!--                        <el-table-column prop="instruction" label="Instruction" width="450" />-->
-<!--                        <el-table-column prop="size" label="Size" align="center" width="125" />-->
-<!--                        <el-table-column prop="digest" label="Digest" width="650" />-->
-<!--                        <el-table-column prop="results" label="Results" />-->
-<!--                    </el-table>-->
-<!--                </div>-->
-<!--            </template>-->
-<!--        </el-table-column>-->
+        <el-table-column fixed type="expand">
+            <template #default="repoProps">
+                <div>
+                    <el-table
+                        id="expanded-tags-table"
+                        highlight-current-row
+                        :data="repoProps.row.tags"
+                        :row-class-name="tableRowClassName"
+                    >
+                        <el-table-column fixed label="" width="50" />
+                        <el-table-column fixed type="expand">
+                            <template #default="tagProps">
+                                <div>
+                                    <el-table
+                                        id="expanded-images-table"
+                                        highlight-current-row
+                                        :data="tagProps.row.images"
+                                        :row-class-name="tableRowClassName"
+                                    >
+                                        <el-table-column label="" width="150" />
+                                        <el-table-column prop="colId" label="Index" align="center" width="200" />
+                                        <el-table-column prop="architecture" label="Architecture" align="center" width="200" />
+                                        <el-table-column prop="variant" label="Variant" align="center" width="400" />
+                                        <el-table-column prop="digest" label="Digest" width="1000" />
+                                    </el-table>
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="colId" label="Index" align="center" width="80" />
+                        <el-table-column prop="tag_name" label="Tag Name" align="center" width="200" />
+                        <el-table-column prop="tag_last_pulled" label="Last Updated" align="center" width="240" />
+                        <el-table-column prop="last_updater_username" label="Last Updater" align="center" show-overflow-tooltip width="200" />
+                        <el-table-column prop="tag_last_pulled" label="Last Pulled" align="center" width="240" />
+                        <el-table-column prop="tag_last_pushed" label="Last Pushed" align="center" width="240" />
+                        <el-table-column prop="media_type" label="Media Type" show-overflow-tooltip align="center" width="400" />
+                        <el-table-column prop="content_type" label="Content Type" align="center" width="150" />
+                    </el-table>
+                </div>
+            </template>
+        </el-table-column>
         <el-table-column fixed prop="namespace" label="Namespace" align="center" show-overflow-tooltip width="200" />
         <el-table-column fixed prop="name" label="Name" align="center" show-overflow-tooltip width="200" />
         <el-table-column prop="user" label="User" align="center" show-overflow-tooltip width="200" />
