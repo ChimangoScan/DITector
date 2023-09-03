@@ -1,6 +1,12 @@
 <template>
     <div class="input-with-search">
-        <el-input id="input-1" v-model="searchKeyword" placeholder="image digest" clearable>
+        <el-input
+                id="input-1"
+                v-model="searchKeyword"
+                placeholder="image digest"
+                clearable
+                @keyup.enter="handleSearchImages"
+        >
             <template #append>
                 <el-button id="search-1" type="primary" @click="handleSearchImages">Search</el-button>
             </template>
@@ -22,11 +28,10 @@
                           id="expanded-table"
                           highlight-current-row
                           :data="props.row.layers"
-                          :row-class-name="tableRowClassName"
                   >
 <!--                      used for left white-->
-                      <el-table-column label="" width="50" />
-                      <el-table-column prop="colId" label="Index" align="center" width="80" />
+                      <el-table-column label="" width="40" />
+                      <el-table-column type="index" :index="indexMethod" align="center" label="Index" width="80" />
                       <el-table-column prop="instruction" label="Instruction" width="450" />
                       <el-table-column prop="size" label="Size" align="center" width="125" />
                       <el-table-column prop="digest" label="Digest" width="650" />
@@ -61,12 +66,13 @@
 
 <script lang="ts" setup>
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 import axios from 'axios';
 
-// row-class-name 对每行内容处理的回调函数
-const tableRowClassName = ({row, rowIndex}) => {
-    row.colId = rowIndex + 1;
-};
+// create index for each line
+const indexMethod = (index: number) => {
+    return index + 1
+}
 
 const currentPage = ref(1);
 const pageSize = ref(20);
@@ -74,6 +80,18 @@ const totalCnt = ref(0);    // total count of documents in response
 const totalPages = ref(0);  // total count of pages (totalCnt/pageSize + 1)
 const searchKeyword = ref('');
 const imagesData = ref([]);
+
+// bool value for loading
+const tableLoading1 = ref(true);
+
+// get current router
+const router = useRouter();
+
+// try to get url query parameter: search
+const search = router.currentRoute.value.query.search;
+if (search !== undefined) {
+    searchKeyword.value = search;
+}
 
 function handleSearchImages() {
   // console.log("button clicked");
@@ -96,6 +114,7 @@ function getImagesData(search, currentPage, pageSize) {
       // console.log(imagesData.value);
       // console.log(response.data);
       recalculateTotalPages();
+      tableLoading1.value = false;
   })
   .catch(error => {
       console.log(error);
@@ -129,11 +148,13 @@ function recalculateTotalPages() {
 
 // fetch images data from backend with searchKeyword, currentPage and pageSize
 function fetchImagesData() {
+    tableLoading1.value = true;
     getImagesData(searchKeyword.value, currentPage.value, pageSize.value);
 }
 
 // init web page
 fetchImagesData();
+
 </script>
 
 <style scoped>

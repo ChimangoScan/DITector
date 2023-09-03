@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"log"
 	"testing"
+	"time"
 )
 
 func TestChangeMongoDocumentField(t *testing.T) {
@@ -31,11 +32,13 @@ func TestConfigMongoClient(t *testing.T) {
 
 func TestMyMongo_GetRepositoriesCountByText(t *testing.T) {
 	mymongo, _ := ConfigMongoClient(false)
-	cnt, err := mymongo.GetRepositoriesCountByText("")
+	begin := time.Now()
+	cnt, err := mymongo.GetRepositoriesCountByText("library")
 	if err != nil {
 		log.Fatalln(err)
 	}
 	fmt.Println(cnt)
+	fmt.Println(time.Since(begin))
 }
 
 func TestMyMongo_FindRepositoriesByText(t *testing.T) {
@@ -88,5 +91,7 @@ func TestMyMongo_InsertResult(t *testing.T) {
 }
 
 func TestMyMongo_FindResultByDigest(t *testing.T) {
-
+	mymongo, _ := ConfigMongoClient(false)
+	results, _ := mymongo.FindResultByDigest("sha256:7cfe7af27bf90963cec63320c6aaf3e25668d552551d58ac0b08ddc497f18ddb")
+	fmt.Println(results)
 }

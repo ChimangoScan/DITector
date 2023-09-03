@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"github.com/gin-gonic/gin"
 	"myutils"
 	"net/http"
+	"regexp"
 	"strconv"
 )
 
@@ -138,6 +140,76 @@ func handleRepositoriesSearch() func(c *gin.Context) {
 	}
 }
 
+// =========================================================
+// used for mapping analysis results of images to layers
+// =========================================================
+
+type ImageWithResults struct {
+	Architecture string             `json:"architecture"`
+	Features     string             `json:"features"`
+	Variant      string             `json:"variant"`
+	Digest       string             `json:"digest"`
+	Layers       []LayerWithResults `json:"layers"`
+	OS           string             `json:"os"`
+	Size         int64              `json:"size"`
+	Status       string             `json:"status"`
+	LastPulled   string             `json:"last_pulled"`
+	LastPushed   string             `json:"last_pushed"`
+}
+
+type LayerWithResults struct {
+	Digest      string `json:"digest,omitempty"`
+	Size        int    `json:"size"`
+	Instruction string `json:"instruction"`
+	Results     string `json:"results"`
+}
+
+func ImagesToWithResults(imgs []*myutils.Image) []*ImageWithResults {
+	imgWithRes := make([]*ImageWithResults, 0)
+
+	for _, img := range imgs {
+		tmp := &ImageWithResults{
+			Architecture: img.Architecture, Features: img.Features, Variant: img.Variant,
+			Digest: img.Digest, OS: img.OS, Size: img.Size, Status: img.Status,
+			LastPulled: img.LastPulled, LastPushed: img.LastPushed,
+		}
+		for _, layer := range img.Layers {
+			tmpLayer := LayerWithResults{}
+			b, _ := json.Marshal(layer)
+			json.Unmarshal(b, &tmpLayer)
+			tmp.Layers = append(tmp.Layers, tmpLayer)
+		}
+		results, err := myMongo.FindResultByDigest(img.Digest)
+		if err != nil {
+			imgWithRes = append(imgWithRes, tmp)
+			continue
+		}
+		// regex match
+		re, _ := regexp.Compile(`layer\[(\d+)]\.instruction`)
+		for _, result := range results.Results {
+			if result.Type == "in-dockerfile-command" {
+				layerIndex := re.FindStringSubmatch(result.Path)
+				if len(layerIndex) > 1 {
+					index, err := strconv.Atoi(layerIndex[1])
+					if err != nil {
+						continue
+					}
+					b, err := json.Marshal(result)
+					if err != nil {
+						continue
+					}
+					tmp.Layers[index].Results = string(b)
+				}
+			}
+		}
+		imgWithRes = append(imgWithRes, tmp)
+	}
+
+	return imgWithRes
+}
+
+// =========================================================
+
 // handleImageSearch return a function used for images
 // searching API exported by gin framework
 //
@@ -182,7 +254,7 @@ func handleImageSearch() func(c *gin.Context) {
 				"count":     totalCnt,
 				"page":      page,
 				"page_size": pageSize,
-				"results":   results,
+				"results":   ImagesToWithResults(results),
 			})
 		}
 	}

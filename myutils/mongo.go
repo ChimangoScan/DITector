@@ -296,7 +296,7 @@ func (mymongo *MyMongo) FindRepositoriesByText(search string, page, pageSize int
 
 	filter := bson.D{}
 	if search != "" {
-		if !StrLegalForMongo(search) {
+		if !StrLegalForRepository(search) {
 			return nil, fmt.Errorf("invalid search parameters")
 		}
 		filter = bson.D{
@@ -360,7 +360,7 @@ func (mymongo *MyMongo) FindImagesByText(search string, page, pageSize int64) ([
 
 	filter := bson.D{}
 	if search != "" {
-		if !StrLegalForMongo(search) {
+		if !StrLegalForImage(search) {
 			return nil, fmt.Errorf("invalid search keywords")
 		}
 		filter = bson.D{
@@ -412,7 +412,7 @@ func (mymongo *MyMongo) FindResultByDigest(digest string) (*ImageResult, error) 
 	}
 
 	// 查询并返回结果
-	err := mymongo.ImagesCollection.FindOne(context.Background(), filter).Decode(imgres)
+	err := mymongo.ResultsCollection.FindOne(context.Background(), filter).Decode(imgres)
 	if err != nil {
 		return nil, err
 	}

@@ -12,8 +12,14 @@ func CalSha256(s string) string {
 	return hex.EncodeToString(tmpHash[:])
 }
 
-// StrLegalForMongo check whether string s is
-func StrLegalForMongo(s string) bool {
+// StrLegalForRepository check whether string s is legal for repository search
+func StrLegalForRepository(s string) bool {
+	match, _ := regexp.MatchString(`^[a-zA-Z0-9:\-]*$`, s)
+	return match
+}
+
+// StrLegalForImage check whether string s is legal for image search
+func StrLegalForImage(s string) bool {
 	match, _ := regexp.MatchString("^[a-zA-Z0-9:]*$", s)
 	return match
 }
