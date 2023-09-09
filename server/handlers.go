@@ -120,7 +120,7 @@ func handleRepositoriesSearch() func(c *gin.Context) {
 		totalCnt := totalRepositoriesCnt
 		if search != "" {
 			// time costs too much
-			//totalCnt, _ = myMongo.GetRepositoriesCountByText(search)
+			totalCnt, _ = myMongo.GetRepositoriesCountByText(search)
 		}
 		results, err := myMongo.FindRepositoriesByText(search, int64(page), int64(pageSize))
 		if err != nil {
@@ -233,9 +233,9 @@ func handleImageSearch() func(c *gin.Context) {
 		}
 
 		totalCnt := totalImagesCnt
-		if search != "" {
+		if search != "" && search != "sha256" {
 			// time costs too much
-			//totalCnt, _ = myMongo.GetImagesCountByText(search)
+			totalCnt, _ = myMongo.GetImagesCountByText(search)
 		}
 		pageSize, err := strconv.Atoi(pageSizeStr)
 		if err != nil || pageSize < 1 {

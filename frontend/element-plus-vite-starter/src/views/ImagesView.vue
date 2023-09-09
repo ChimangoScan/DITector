@@ -14,6 +14,7 @@
     </div>
     <el-table
             :data="imagesData"
+            v-loading="tableLoading1"
             highlight-current-row
             stripe
             table-layout="fixed"
@@ -56,7 +57,7 @@
               :page-sizes="[10, 20, 50]"
               :page-size="pageSize"
               layout=" prev, pager, next, jumper, sizes, total, "
-              :total="totalPages"
+              :total="totalCnt"
               @size-change="handleSizeChange"
               @current-change="handleCurrentChange"
               align="center"
@@ -113,7 +114,6 @@ function getImagesData(search, currentPage, pageSize) {
       totalCnt.value = response.data['count'];
       // console.log(imagesData.value);
       // console.log(response.data);
-      recalculateTotalPages();
       tableLoading1.value = false;
   })
   .catch(error => {
@@ -131,19 +131,8 @@ function handleSizeChange(val: number) {
     currentPage.value = 1;
     // change pageSize
     pageSize.value = val;
-    // recalculate totalPages
-    recalculateTotalPages();
     console.log(pageSize.value);
     fetchImagesData();
-}
-
-// recalculate TotalPages after totalCnt or pageSize changed
-function recalculateTotalPages() {
-    if (totalCnt.value === 0) {
-        totalPages.value = 0;
-    } else {
-        totalPages.value = Math.floor(totalCnt.value / pageSize.value + 1);
-    }
 }
 
 // fetch images data from backend with searchKeyword, currentPage and pageSize

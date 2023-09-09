@@ -84,7 +84,7 @@
             :page-sizes="[10, 15, 20]"
             :page-size="pageSize"
             layout=" prev, pager, next, jumper, sizes, total, "
-            :total="totalPages"
+            :total="totalCnt"
             @size-change="handleSizeChange"
             @current-change="handleCurrentChange"
             align="center"
@@ -104,7 +104,8 @@ const indexMethod = (index: number) => {
 const currentPage = ref(1);
 const pageSize = ref(20);
 const totalCnt = ref(0);    // total count of documents in response
-const totalPages = ref(0);  // total count of pages (totalCnt/pageSize + 1)
+// totalPages is calculated automatically by el-pagination with totalCnt
+// const totalPages = ref(0);  // total count of pages (totalCnt/pageSize + 1)
 const searchKeyword = ref('');
 const repositoriesData = ref([]);
 
@@ -131,7 +132,6 @@ function getRepositoriesData(search, page, pageSize) {
         totalCnt.value = response.data['count'];
         // console.log(imagesData.value);
         // console.log(response.data);
-        recalculateTotalPages();
         tableLoading1.value = false;
     })
     .catch(error => {
@@ -149,19 +149,8 @@ function handleSizeChange(val: number) {
     currentPage.value = 1;
     // change pageSize
     pageSize.value = val;
-    // recalculate totalPages
-    recalculateTotalPages();
     console.log(pageSize.value);
     fetchRepositoriesData();
-}
-
-// recalculate TotalPages after totalCnt or pageSize changed
-function recalculateTotalPages() {
-    if (totalCnt.value === 0) {
-        totalPages.value = 0;
-    } else {
-        totalPages.value = Math.floor(totalCnt.value / pageSize.value + 1);
-    }
 }
 
 // fetch repositories data from backend with searchKeyword, currentPage and pageSize

@@ -1,15 +1,21 @@
 package scripts
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"io"
 	"log"
 	"myutils"
 	"os"
 	"path"
+	"runtime"
+	"sort"
+	"strconv"
+	"time"
 )
 
 // Record is used for store a piece of JSON record
@@ -172,4 +178,183 @@ func CalculateRepositoriesDependentWeights() {
 			}
 		}
 	}
+}
+
+// =======================================================================
+// calculate total, average and top 100 records according to upstream and downstream counts
+// =======================================================================
+
+var chanRecord = make(chan *Record, runtime.NumCPU())
+
+// RecordUpSlice used to store top 100 record according to upstream
+type RecordUpSlice []*Record
+
+func (rs RecordUpSlice) Len() int { return len(rs) }
+func (rs RecordUpSlice) Less(i, j int) bool {
+	return rs[i].UpstreamImageCount > rs[j].UpstreamImageCount
+}
+func (rs RecordUpSlice) Swap(i, j int) { rs[i], rs[j] = rs[j], rs[i] }
+
+// CheckDigest checks whether an image with digest is unique in RecordSlice
+func (rs RecordUpSlice) CheckDigest(digest string) bool {
+	for _, record := range rs {
+		if digest == record.ImageDigest {
+			return true
+		}
+	}
+	return false
+}
+
+// RecordDownSlice used to store top 100 record according to downstream
+type RecordDownSlice []*Record
+
+func (rs RecordDownSlice) Len() int { return len(rs) }
+func (rs RecordDownSlice) Less(i, j int) bool {
+	return rs[i].DownstreamImageCount > rs[j].DownstreamImageCount
+}
+func (rs RecordDownSlice) Swap(i, j int) { rs[i], rs[j] = rs[j], rs[i] }
+
+// CheckDigest checks whether an image with digest is unique in RecordSlice
+func (rs RecordDownSlice) CheckDigest(digest string) bool {
+	for _, record := range rs {
+		if digest == record.ImageDigest {
+			return true
+		}
+	}
+	return false
+}
+
+// StatisticRepositoriesDependentWeights calculates
+// dependent weight statistics of each repository
+// by read and process file /data/docker-crawler/results/dependent-weights.txt
+func StatisticRepositoriesDependentWeights() {
+	resultFile, _ := os.OpenFile("/data/docker-crawler/results/dependent-weights-top100.txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0744)
+
+	go readDependentWeightFileByLine()
+
+	var total int64 = 0
+	var totalUp int64 = 0
+	var top100Up = make(RecordUpSlice, 100, 100)
+	// assign initial value for each element
+	for i := range top100Up {
+		top100Up[i] = &Record{}
+	}
+	var totalDown int64 = 0
+	var top100Down = make(RecordDownSlice, 100, 100)
+	for i := range top100Down {
+		top100Down[i] = &Record{}
+	}
+
+	fmt.Println(top100Up[0].UpstreamImageCount)
+
+	for record := range chanRecord {
+		total++
+		totalUp += int64(record.UpstreamImageCount)
+		totalDown += int64(record.DownstreamImageCount)
+
+		// recalculate top 100 up
+		if !top100Up.CheckDigest(record.ImageDigest) {
+			top100Up = append(top100Up, record)
+			sort.Sort(top100Up)
+			top100Up = top100Up[:100]
+		}
+
+		if !top100Down.CheckDigest(record.ImageDigest) {
+			top100Down = append(top100Down, record)
+			sort.Sort(top100Down)
+			top100Down = top100Down[:100]
+		}
+
+		if total%1000 == 0 {
+			fmt.Println("process record:", total)
+			fmt.Println("top 1 up:", top100Up[0].UpstreamImageCount, ", top 100 up:", top100Up[99].UpstreamImageCount)
+			fmt.Println("top 1 down:", top100Down[0].DownstreamImageCount, ", top 100 down:", top100Down[99].DownstreamImageCount)
+			myutils.LogDockerCrawlerString(myutils.LogLevel.Info,
+				fmt.Sprintf("processing record: %d, top 1 up: %d, top 100 up: %d, top 1 down: %d, top 100 down: %d\n",
+					total, top100Up[0].UpstreamImageCount, top100Up[99].UpstreamImageCount,
+					top100Down[0].DownstreamImageCount, top100Down[99].DownstreamImageCount,
+				),
+			)
+		}
+	}
+
+	averageUp := totalUp / total
+	averageDown := totalDown / total
+
+	resultFile.WriteString(fmt.Sprintf("total upstream cnt: %d, average upstream cnt: %d\n", totalUp, averageUp))
+	resultFile.WriteString(fmt.Sprintf("total downstream cnt: %d, average downstream cnt: %d\n", totalDown, averageDown))
+
+	resultFile.WriteString("\n================Top100 Up================\n")
+	for _, upRecord := range top100Up {
+		recordBytes, err := json.Marshal(upRecord)
+		if err != nil {
+			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+		}
+		resultFile.Write(recordBytes)
+		resultFile.WriteString("\n")
+	}
+
+	resultFile.WriteString("\n================Top100 Down================\n")
+	for _, downRecord := range top100Down {
+		recordBytes, err := json.Marshal(downRecord)
+		if err != nil {
+			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+		}
+		resultFile.Write(recordBytes)
+		resultFile.WriteString("\n")
+	}
+
+}
+
+// readDependentWeightFileByLine read the file storing
+// the results of dependent weights of each repository
+// by line.
+func readDependentWeightFileByLine() {
+	fileDependentWeights, err := os.Open("/data/docker-crawler/results/dependent-weights.txt")
+	if err != nil {
+		log.Fatalln(err)
+	}
+	// 退出时结束占用的资源
+	defer func() {
+		fileDependentWeights.Close()
+		fmt.Println("[INFO] read done: /data/docker-crawler/results/dependent-weights.txt")
+		close(chanRecord)
+	}()
+
+	beginTime := time.Now()
+
+	// 逐行读取文件内容直到EOF或其他错误
+	scanner := bufio.NewReader(fileDependentWeights)
+	for i := 0; ; i++ {
+		b, err := scanner.ReadBytes('\n')
+		if err != nil {
+			// 读到fileRepository结尾，退出
+			if err == io.EOF {
+				break
+			}
+			fmt.Println("[ERROR] Fail to ReadLine in /data/docker-crawler/results/dependent-weights.txt: Line", i, ", err:", err)
+			myutils.LogDockerCrawlerString(myutils.LogLevel.Error,
+				"Fail to ReadLine in /data/docker-crawler/results/dependent-weights.txt: Line",
+				strconv.Itoa(i), "err:", err.Error())
+			break
+		}
+
+		// 解析内容，发到管道，等待scheduler调度
+		var record = new(Record)
+		err = json.Unmarshal(b, record)
+		if err != nil {
+			fmt.Println("[ERROR] json.Unmarshal failed with:", err)
+			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "json.Unmarshal failed with:", err.Error())
+			continue
+		}
+		chanRecord <- record
+
+		if i%1000 == 0 {
+			fmt.Println("Line", i, ", Total Time:", time.Since(beginTime))
+		}
+	}
+	fmt.Println("File /data/docker-crawler/results/dependent-weights.txt Final Line, Total Time:", time.Since(beginTime))
+	myutils.LogDockerCrawlerString(myutils.LogLevel.Info, "load file /data/docker-crawler/results/dependent-weights.txt finished, total time:",
+		time.Since(beginTime).String(),
+	)
 }

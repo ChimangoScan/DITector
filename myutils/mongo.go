@@ -147,16 +147,20 @@ func ConfigMongoClient(initFlag bool) (*MyMongo, error) {
 		// create text index on digest for search
 		resultsModelText := mongo.IndexModel{
 			Keys: bson.D{
-				{Key: "results.name", Value: "text"},
+				{Key: "results.rulename", Value: "text"},
 				{Key: "results.type", Value: "text"},
 				{Key: "results.path", Value: "text"},
 				{Key: "results.match", Value: "text"},
+				{Key: "results.severity", Value: "text"},
+				{Key: "results.layerdigest", Value: "text"},
 			},
 			Options: options.Index().SetWeights(bson.D{
 				{Key: "results.name", Value: 2},
 				{Key: "results.type", Value: 2},
 				{Key: "results.path", Value: 1},
 				{Key: "results.match", Value: 1},
+				{Key: "results.severity", Value: 1},
+				{Key: "results.layerdigest", Value: 1},
 			}),
 		}
 		_, err = resultsIndexView.CreateOne(context.TODO(), resultsModelText)
@@ -277,7 +281,7 @@ func (mymongo *MyMongo) DropAllDocuments() error {
 }
 
 // GetRepositoriesCountByText calculate total count of documents
-// in repositories collection searched by keyword, used for el-table page division
+// in repositories collection searched by keyword
 func (mymongo *MyMongo) GetRepositoriesCountByText(keyword string) (int64, error) {
 	filter := bson.D{}
 	if keyword != "" {
@@ -341,7 +345,7 @@ func (mymongo *MyMongo) FindRepositoryByName(namespace, repository string) (*Rep
 }
 
 // GetImagesCountByText calculate total count of documents
-// in images collection searched by keyword (digest), used for el-table page division
+// in images collection searched by keyword (digest)
 func (mymongo *MyMongo) GetImagesCountByText(keyword string) (int64, error) {
 	filter := bson.D{}
 	if keyword != "" {
@@ -400,6 +404,19 @@ func (mymongo *MyMongo) FindImageByDigest(digest string) (*Image, error) {
 	}
 
 	return img, nil
+}
+
+// GetResultsCountByText calculate total count of documents
+// in results collection searched by keyword
+func (mymongo *MyMongo) GetResultsCountByText(keyword string) (int64, error) {
+	filter := bson.D{}
+	if keyword != "" {
+		filter = bson.D{
+			{"$text", bson.D{{"$search", keyword}}},
+		}
+	}
+
+	return mymongo.ResultsCollection.CountDocuments(context.TODO(), filter)
 }
 
 func (mymongo *MyMongo) FindResultByDigest(digest string) (*ImageResult, error) {

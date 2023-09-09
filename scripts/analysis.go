@@ -6,17 +6,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"log"
 	"myutils"
-	"os"
 	"strconv"
-	"strings"
 )
-
-var selflogger, _ = os.OpenFile("/data/docker-crawler/results/secrets-in-image-metadata.log", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0744)
-
-func logself(s ...string) {
-	tmp := strings.Join(s, " ")
-	selflogger.WriteString(myutils.GetLocalNowTime() + " " + tmp + "\n")
-}
 
 // ScanAllSecretsInImageMetadata scan all secrets in metadata
 // images, and write results to mongo.dockerhub.results.
