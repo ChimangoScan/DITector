@@ -1,16 +1,27 @@
 <template>
     <div class="input-with-search">
-        <el-input
-                id="input-1"
-                v-model="searchKeyword"
-                placeholder="name, namespace or description of repository"
-                clearable
-                @keyup.enter="handleSearchRepositories"
-        >
-            <template #append>
-                <el-button id="search-1" type="primary" @click="handleSearchRepositories">Search</el-button>
-            </template>
-        </el-input>
+        <el-row>
+            <el-col :span="20">
+                <el-input
+                        id="input-1"
+                        v-model="searchKeyword"
+                        placeholder="name, namespace or description of repository"
+                        clearable
+                        @keyup.enter="handleSearchRepositories"
+                />
+            </el-col>
+
+            <el-col :span="4">
+                <el-button
+                        id="search-1"
+                        type="primary"
+                        @click="handleSearchRepositories"
+                >
+                    Search
+                </el-button>
+            </el-col>
+        </el-row>
+
     </div>
     <el-table
         :data="repositoriesData"
@@ -19,7 +30,7 @@
         stripe
         table-layout="fixed"
         style="width: 100%"
-        max-height="700"
+        max-height="700em"
     >
         <!--        可收缩展开内容-->
         <el-table-column fixed type="expand">
@@ -46,7 +57,7 @@
                                         <el-table-column label="Digest" width="1000">
                                             <template #default="{ row }">
 <!--                                                use vue string template to transfer "`${row.digest}`"-->
-                                                <el-link :underline="false" target="_blank" :href="`http://10.10.21.122:5173/#/images?search=${row.digest}`">
+                                                <el-link :underline="false" target="_blank" :href="`http://10.10.21.212:5173/#/images?search=${row.digest.slice(7)}`">
                                                     {{ row.digest }}
                                                 </el-link>
                                             </template>
@@ -121,7 +132,7 @@ function handleSearchRepositories() {
 
 function getRepositoriesData(search, page, pageSize) {
     // axios get images data responsed from backend API
-    axios.get('http://10.10.21.122:23434/repositories', {
+    axios.get('http://10.10.21.212:23434/repositories', {
         params: {
             search: search,
             page: page,
@@ -165,11 +176,11 @@ fetchRepositoriesData();
 <style scoped>
 .input-with-search {
     float: right;
-    width: 45%;
+    width: 60%;
 }
 
 .pagination-bottom {
-    margin-top: 20;
+    margin-top: 0.2em;
     display: flex;
     justify-content: center;
 }

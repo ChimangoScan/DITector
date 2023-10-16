@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // =========================================================
@@ -168,49 +169,59 @@ func ImagesToWithResults(imgs []*myutils.Image) []*ImageWithResults {
 	imgWithRes := make([]*ImageWithResults, 0)
 
 	for _, img := range imgs {
-		tmp := &ImageWithResults{
-			Architecture: img.Architecture, Features: img.Features, Variant: img.Variant,
-			Digest: img.Digest, OS: img.OS, Size: img.Size, Status: img.Status,
-			LastPulled: img.LastPulled, LastPushed: img.LastPushed,
-		}
-		for _, layer := range img.Layers {
-			tmpLayer := LayerWithResults{}
-			b, _ := json.Marshal(layer)
-			json.Unmarshal(b, &tmpLayer)
-			tmp.Layers = append(tmp.Layers, tmpLayer)
-		}
 		results, err := myMongo.FindResultByDigest(img.Digest)
 		if err != nil {
-			imgWithRes = append(imgWithRes, tmp)
 			continue
 		}
-		// regex match
-		re, _ := regexp.Compile(`layer\[(\d+)]\.instruction`)
-		for _, result := range results.Results {
-			if result.Type == "in-dockerfile-command" {
-				layerIndex := re.FindStringSubmatch(result.Path)
-				if len(layerIndex) > 1 {
-					index, err := strconv.Atoi(layerIndex[1])
-					if err != nil {
-						continue
-					}
-					b, err := json.Marshal(result)
-					if err != nil {
-						continue
-					}
-					tmp.Layers[index].Results = string(b)
-				}
-			}
-		}
+
+		tmp := combineImageAndResult(img, results)
 		imgWithRes = append(imgWithRes, tmp)
 	}
 
 	return imgWithRes
 }
 
-// =========================================================
+func combineImageAndResult(img *myutils.Image, res *myutils.ImageResult) *ImageWithResults {
+	imgres := &ImageWithResults{
+		Architecture: img.Architecture, Features: img.Features, Variant: img.Variant,
+		Digest: img.Digest, OS: img.OS, Size: img.Size, Status: img.Status,
+		LastPulled: img.LastPulled, LastPushed: img.LastPushed,
+	}
 
-// handleImageSearch return a function used for images
+	// add layers of img to imgres
+	for _, layer := range img.Layers {
+		tmpLayer := LayerWithResults{}
+		b, _ := json.Marshal(layer)
+		json.Unmarshal(b, &tmpLayer)
+		imgres.Layers = append(imgres.Layers, tmpLayer)
+	}
+
+	// regex match
+	re, _ := regexp.Compile(`layer\[(\d+)]\.instruction`)
+
+	// add results to layer according to result.Path
+	for _, result := range res.Results {
+		if result.Type == "in-dockerfile-command" {
+			layerIndex := re.FindStringSubmatch(result.Path)
+			if len(layerIndex) > 1 {
+				index, err := strconv.Atoi(layerIndex[1])
+				if err != nil {
+					continue
+				}
+				b, err := json.Marshal(result)
+				if err != nil {
+					continue
+				}
+				imgres.Layers[index].Results = string(b)
+			}
+		}
+	}
+
+	return imgres
+}
+
+// =========================================================
+// handleImagesSearch return a function used for images
 // searching API exported by gin framework
 //
 // URI arguments:
@@ -221,7 +232,7 @@ func ImagesToWithResults(imgs []*myutils.Image) []*ImageWithResults {
 // page: current page of the view
 //
 // page_size: page size of the view
-func handleImageSearch() func(c *gin.Context) {
+func handleImagesSearch() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		search := c.DefaultQuery("search", "")
 		pageStr := c.DefaultQuery("page", "1")
@@ -233,7 +244,7 @@ func handleImageSearch() func(c *gin.Context) {
 		}
 
 		totalCnt := totalImagesCnt
-		if search != "" && search != "sha256" {
+		if search != "" && !strings.Contains(search, "sha256:") {
 			// time costs too much
 			totalCnt, _ = myMongo.GetImagesCountByText(search)
 		}
@@ -255,6 +266,72 @@ func handleImageSearch() func(c *gin.Context) {
 				"page":      page,
 				"page_size": pageSize,
 				"results":   ImagesToWithResults(results),
+			})
+		}
+	}
+}
+
+func ResultsToImagesWithResults(imgRes []*myutils.ImageResult) []*ImageWithResults {
+	imgWithRes := make([]*ImageWithResults, 0)
+
+	for _, res := range imgRes {
+		img, err := myMongo.FindImageByDigest(res.Digest)
+		if err != nil {
+			continue
+		}
+		tmp := combineImageAndResult(img, res)
+		imgWithRes = append(imgWithRes, tmp)
+	}
+
+	return imgWithRes
+}
+
+// =========================================================
+// handleResultSearch return a function used for results
+// searching API exported by gin framework
+//
+// URI arguments:
+// search: keyword for searching images from MongoDB,
+//
+//	now only searching according to digest
+//
+// page: current page of the view
+//
+// page_size: page size of the view
+func handleResultSearch() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		search := c.DefaultQuery("search", "")
+		pageStr := c.DefaultQuery("page", "1")
+		pageSizeStr := c.DefaultQuery("page_size", "10")
+
+		page, err := strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+
+		totalCnt := totalImagesCnt
+		if search != "" {
+			// time costs too much
+			totalCnt, _ = myMongo.GetResultsCountByText(search)
+		}
+		pageSize, err := strconv.Atoi(pageSizeStr)
+		if err != nil || pageSize < 1 {
+			pageSize = 10
+		}
+
+		results, err := myMongo.FindResultsByText(search, int64(page), int64(pageSize))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"msg": err.Error(),
+			})
+		} else {
+			// used to handle CORS requests
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.JSON(http.StatusOK, gin.H{
+				"count":     totalCnt,
+				"page":      page,
+				"page_size": pageSize,
+				"results":   ResultsToImagesWithResults(results),
 			})
 		}
 	}

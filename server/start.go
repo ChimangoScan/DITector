@@ -16,8 +16,9 @@ func StartServer() {
 		})
 	})
 
-	router.GET("/images", handleImageSearch())
+	router.GET("/images", handleImagesSearch())
 	router.GET("/repositories", handleRepositoriesSearch())
+	router.GET("/results", handleResultSearch())
 
 	router.Run(":23434")
 }

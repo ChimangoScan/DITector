@@ -419,6 +419,35 @@ func (mymongo *MyMongo) GetResultsCountByText(keyword string) (int64, error) {
 	return mymongo.ResultsCollection.CountDocuments(context.TODO(), filter)
 }
 
+func (mymongo *MyMongo) FindResultsByText(search string, page, pageSize int64) ([]*ImageResult, error) {
+	var res = make([]*ImageResult, 0)
+
+	filter := bson.D{}
+	if search != "" {
+		// check whether input is legal for results collection
+		//if !StrLegalForImage(search) {
+		//	return nil, fmt.Errorf("invalid search keywords")
+		//}
+		filter = bson.D{
+			{"$text", bson.D{{"$search", search}}},
+		}
+	}
+
+	optLimit := options.Find().SetSkip((page - 1) * pageSize).SetLimit(pageSize)
+
+	cursor, err := mymongo.ResultsCollection.Find(context.TODO(), filter, optLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	if err = cursor.All(context.TODO(), &res); err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (mymongo *MyMongo) FindResultByDigest(digest string) (*ImageResult, error) {
 	var imgres = new(ImageResult)
 
