@@ -6,11 +6,12 @@ import (
 )
 
 type ImageAnalyzer struct {
-	Namespace         string            `json:"namespace"`
-	Repository        string            `json:"repository"`
-	Tag               string            `json:"tag"`
-	Digest            string            `json:"digest"`
-	LayerLocalFileMap map[string]string `json:"layer_local_file_map"`
+	Registry          string
+	Namespace         string
+	Repository        string
+	Tag               string
+	Digest            string
+	LayerLocalFileMap map[string]string
 	rules             Rules
 }
 

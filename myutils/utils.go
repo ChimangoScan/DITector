@@ -25,11 +25,25 @@ func StrLegalForImage(s string) bool {
 	return match
 }
 
-// DivideImageName TODO: 拆解镜像名称，[registry/][namespace/]repository[:tag][@digest]
+// DivideImageName 拆解镜像名称，[registry/][namespace/]repository[:tag][@digest]
 func DivideImageName(name string) (registry, namespace, repository, tag, digest string) {
-	parts := strings.Split(name, ":")
-	// 暂时还有问题，需要修复
-	repoParts := strings.Split(parts[0], "/")
+	// obtain digest by splitting by "@"
+	digestParts := strings.Split(name, "@")
+	if len(digestParts) == 2 {
+		digest = digestParts[1]
+	}
+
+	// obtain tag by splitting by ":"
+	nameParts := strings.Split(digestParts[0], ":")
+	switch len(nameParts) {
+	case 1:
+		tag = "latest"
+	case 2:
+		tag = nameParts[1]
+	}
+
+	// obtain registry, namespace, repository by splitting by "/"
+	repoParts := strings.Split(nameParts[0], "/")
 	switch len(repoParts) {
 	case 1:
 		registry = "docker.io"
@@ -44,21 +58,6 @@ func DivideImageName(name string) (registry, namespace, repository, tag, digest 
 		namespace = repoParts[1]
 		repository = repoParts[2]
 	}
-	repository = parts[0]
-	if len(parts) == 2 {
-		if strings.Contains(parts[1], "@") {
-			digest = parts[1]
-		} else {
-			tag = parts[1]
-		}
-	} else if len(parts) == 3 {
-		namespace = parts[0]
-		repository = parts[1]
-		if strings.Contains(parts[2], "@") {
-			digest = parts[2]
-		} else {
-			tag = parts[2]
-		}
-	}
+
 	return
 }
