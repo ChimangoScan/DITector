@@ -25,6 +25,7 @@
     "neo4j_password": "qazwsxedc"
   },
   "rules_config": {
-    "secret_rules_file": "rules/secret_rules.yaml"
+    "secret_rules_file": "rules/secret_rules.yaml",
+    "sensitive_param_rules_file": "rules/sensitive_param_rules.yaml"
   }
 }

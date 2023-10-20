@@ -21,6 +21,10 @@ func NewNeo4jDriver(target, neo4jUsername, neo4jPassword string, initFlag bool) 
 		target,
 		neo4j.BasicAuth(neo4jUsername, neo4jPassword, ""),
 	)
+	fmt.Println("connect neo4j got err:", err)
+	if err != nil {
+		return nil, err
+	}
 
 	// 创建索引，neo4j没有提供判断重复创建索引导致报错的函数，所以不处理err
 	if initFlag {

@@ -8,11 +8,11 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"strings"
 )
 
 var GlobalConfig struct {
 	MaxThread        int           `json:"max_thread"`
-	DataDir          string        `json:"data_dir"`
 	RepositoriesFile string        `json:"repositories_file"`
 	TagsFile         string        `json:"tags_file"`
 	ImagesFile       string        `json:"images_file"`
@@ -49,7 +49,8 @@ type Neo4jConfig struct {
 }
 
 type RulesConfig struct {
-	SecretRulesFile string `json:"secret_rules_file"`
+	SecretRulesFile         string `json:"secret_rules_file"`
+	SensitiveParamRulesFile string `json:"sensitive_param_rules_file"`
 }
 
 // GlobalDBClient 用于维护全局所有模块的数据库client连接
@@ -64,7 +65,7 @@ func init() {
 	// 获取程序根目录
 	_, filename, _, _ := runtime.Caller(0)
 	root := path.Dir(path.Dir(filename))
-	configFile := root + "/config.json"
+	configFile := path.Join(root, "config.json")
 
 	// 加载config.json
 	fb, err := os.ReadFile(configFile)
@@ -75,8 +76,12 @@ func init() {
 		log.Fatalf("[ERROR] Json failed to unmarshal %s with err: %v\n", configFile, err)
 	}
 
+	// 调整相对路径到绝对路径
+	relativeToAbsoluteConfig(root)
+
 	// 初始化日志模块
 	//logFilePath := "/data/docker-crawler/docker-crawler.log"
+	fmt.Println(GlobalConfig.LogFile)
 	logFilepath := GlobalConfig.LogFile
 	if err = configLogger(logFilepath); err != nil {
 		log.Fatalf("[ERROR] Open %s failed with: %s\n", logFilepath, err)
@@ -84,7 +89,32 @@ func init() {
 		fmt.Println("[+] Open log file: ", logFilepath)
 	}
 
+	// 初始化数据库连接
+	//connectDBs()
+}
+
+// relativeToAbsoluteConfig 将GlobalConfig中相对路径的部分调整为绝对路径
+func relativeToAbsoluteConfig(root string) {
+	if !strings.HasPrefix(GlobalConfig.LogFile, "/") {
+		GlobalConfig.LogFile = path.Join(root, GlobalConfig.LogFile)
+	}
+	if !strings.HasPrefix(GlobalConfig.CrawlerConfig.ProxyFile, "/") {
+		GlobalConfig.CrawlerConfig.ProxyFile = path.Join(root, GlobalConfig.CrawlerConfig.ProxyFile)
+	}
+	if !strings.HasPrefix(GlobalConfig.RulesConfig.SecretRulesFile, "/") {
+		GlobalConfig.RulesConfig.SecretRulesFile = path.Join(root, GlobalConfig.RulesConfig.SecretRulesFile)
+	}
+	if !strings.HasPrefix(GlobalConfig.RulesConfig.SensitiveParamRulesFile, "/") {
+		GlobalConfig.RulesConfig.SensitiveParamRulesFile = path.Join(root, GlobalConfig.RulesConfig.SensitiveParamRulesFile)
+	}
+}
+
+// connectDBs connects MongoDB and Neo4j based on config.json
+func connectDBs() {
+	var err error
+
 	// 连接MongoDB
+	// TODO: Mongo Timeout设置不正确，目前不生效
 	if GlobalDBClient.Mongo, err = NewMongo(GlobalConfig.MongoConfig.URI, GlobalConfig.MongoConfig.Database,
 		GlobalConfig.MongoConfig.Collections.Repositories, GlobalConfig.MongoConfig.Collections.Tags,
 		GlobalConfig.MongoConfig.Collections.Images, GlobalConfig.MongoConfig.Collections.Results,
@@ -98,6 +128,7 @@ func init() {
 	}
 
 	// 连接Neo4j
+	// TODO: Neo4j连接返回的err不正确，目前永远为nil
 	if GlobalDBClient.Neo4j, err = NewNeo4jDriver(GlobalConfig.Neo4jConfig.Neo4jURI, GlobalConfig.Neo4jConfig.Neo4jUsername,
 		GlobalConfig.Neo4jConfig.Neo4jPassword, false); err != nil {
 		GlobalDBClient.Neo4jFlag = false

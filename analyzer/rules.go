@@ -6,8 +6,9 @@ import (
 	"regexp"
 )
 
-type Rules struct {
-	SecretRules []*SecretRule `yaml:"secrets"`
+type ImageAnalyzerRules struct {
+	SecretRules         []*SecretRule         `yaml:"secrets"`
+	SensitiveParamRules []*SensitiveParamRule `yaml:"sensitive_params"`
 }
 
 type SecretRule struct {
@@ -19,21 +20,44 @@ type SecretRule struct {
 	SeverityScore float64        `yaml:"severity_score"`
 }
 
-func (rs *Rules) loadSecretsFromYAMLFile(path string) error {
+type SensitiveParamRule struct {
+}
+
+func newImageAnalyzerRules() *ImageAnalyzerRules {
+	rules := new(ImageAnalyzerRules)
+	rules.SecretRules = make([]*SecretRule, 0)
+	rules.SensitiveParamRules = make([]*SensitiveParamRule, 0)
+	return rules
+}
+
+func (rs *ImageAnalyzerRules) loadSecretsFromYAMLFile(path string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
-	if err := yaml.Unmarshal(content, &rs); err != nil {
+	if err := yaml.Unmarshal(content, &rs.SecretRules); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (rs *Rules) compileSecretsRegex() {
+func (rs *ImageAnalyzerRules) compileSecretsRegex() {
 	for _, secret := range rs.SecretRules {
 		secret.CompiledRegex, _ = regexp.Compile(secret.Regex)
 	}
+}
+
+func (rs *ImageAnalyzerRules) loadSensitiveParamsFromYAMLFile(path string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	if err := yaml.Unmarshal(content, &rs.SensitiveParamRules); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -5,7 +5,14 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strings"
+	"time"
 )
+
+var shanghai, _ = time.LoadLocation("Asia/Shanghai")
+
+func GetLocalNowTime() string {
+	return time.Now().In(shanghai).Format(time.DateTime)
+}
 
 // CalSha256 对字符串计算sha256，并返回string
 func CalSha256(s string) string {

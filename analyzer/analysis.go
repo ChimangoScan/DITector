@@ -1,13 +1,30 @@
 package analyzer
 
 import (
+	"fmt"
 	"myutils"
 )
 
-var myNeo4jDriver, _ = myutils.NewNeo4jDriver("neo4j://localhost:7687", "neo4j", "qazwsxedc", false)
+var imageAnalyzer, imageAnalyzerE = NewImageAnalyzerGlobalConfig()
 
-// AnalyzeImage 彻底分析镜像：描述、配置、内容
-func AnalyzeImage(name, secretRuleFilePath string) (*myutils.ImageResult, error) {
+// AnalyzeImage analyzes the image totally, including metadata, configuration, content of the image
+func AnalyzeImage(name string) (*myutils.ImageResult, error) {
+	if imageAnalyzerE != nil {
+		return nil, fmt.Errorf("create ImageAnalyzer failed with: %s", imageAnalyzerE)
+	}
+
+	var err error
+	res := new(myutils.ImageResult)
+
+	return res, err
+}
+
+// AnalyzeImagePartial analyzes partial information of the image, currently only metadata
+func AnalyzeImagePartial(name string) (*myutils.ImageResult, error) {
+	if imageAnalyzerE != nil {
+		return nil, fmt.Errorf("create ImageAnalyzer failed with: %s", imageAnalyzerE)
+	}
+
 	var err error
 	res := new(myutils.ImageResult)
 

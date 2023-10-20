@@ -5,6 +5,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"time"
 )
 
 type MyMongo struct {
@@ -21,6 +22,7 @@ func NewMongo(uri, database, repositories, tags, images, results string, initFla
 	var err error
 
 	mongoOptions := options.Client().ApplyURI(uri)
+	mongoOptions.SetConnectTimeout(time.Second)
 	mymongo.Client, err = mongo.Connect(context.TODO(), mongoOptions)
 	if err != nil {
 		return mymongo, err
