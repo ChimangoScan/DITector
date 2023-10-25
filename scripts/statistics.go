@@ -126,7 +126,7 @@ func CalculateRepositoriesDependentWeights() {
 						}
 						accumulateLayerID += layer.Digest[7:]
 					}
-					accumulateHash := myutils.CalSha256(accumulateLayerID)
+					accumulateHash := myutils.CalStrSha256(accumulateLayerID)
 
 					// calculate upstream and downstream images
 					upImages, err := myNeo4jDriver.FindUpstreamImagesByNodeId(accumulateHash)

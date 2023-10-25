@@ -80,7 +80,7 @@ func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(image *ImageSource) {
 		curLayer := image.Image.Layers[i]
 		layerID := curLayer.Digest[7:]
 		accumulateLayerID += layerID
-		accumulateHash = CalSha256(accumulateLayerID)
+		accumulateHash = CalStrSha256(accumulateLayerID)
 
 		// 插入层及层间的边
 		_, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, previousHash, accumulateHash, curLayer))
@@ -356,7 +356,7 @@ func CalculateImageNodeId(image *ImageOld) string {
 		}
 		accumulateLayerID += layer.Digest[7:]
 	}
-	accumulateHash := CalSha256(accumulateLayerID)
+	accumulateHash := CalStrSha256(accumulateLayerID)
 
 	return accumulateHash
 }

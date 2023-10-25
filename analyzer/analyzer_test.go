@@ -7,15 +7,16 @@ import (
 	"testing"
 )
 
-func TestAnalyzeImageMetadata(t *testing.T) {
-	mymongo, _ := myutils.ConfigMongoClient(false)
-	imageAnalyzer, _ := NewImageAnalyzerGlobalConfig()
+func TestNewImageAnalyzerGlobalConfig(t *testing.T) {
 
-	targetImages, _ := mymongo.FindImagesByText("", 1, 10)
-	targetImages = append(targetImages, &myutils.ImageOld{
-		Layers: []myutils.LayerSource{
-			myutils.LayerSource{},
-			myutils.LayerSource{Digest: "123456", Instruction: "-----BEGIN RSA PRIVATE KEYsk_test_000011112222333344445555", Size: 10},
+}
+
+func TestAnalyzeImageMetadata(t *testing.T) {
+	targetImages := make([]*myutils.Image, 0)
+	targetImages = append(targetImages, &myutils.Image{
+		Layers: []myutils.Layer{
+			myutils.Layer{},
+			myutils.Layer{Digest: "123456", Instruction: "-----BEGIN RSA PRIVATE KEYsk_test_000011112222333344445555", Size: 10},
 		},
 	})
 	for _, targetImage := range targetImages {

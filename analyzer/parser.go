@@ -1,43 +1,70 @@
 package analyzer
 
 import (
+	"context"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"myutils"
 )
 
 type CurrentImage struct {
-	DockerClient *client.Client `json:"-"`
-	Filepath     string         `json:"filepath,omitempty"`
+	dockerClient *client.Client
+	filepath     string
+	name         string
 
-	Name           string `json:"name"`
-	Registry       string `json:"registry"`
-	Namespace      string `json:"namespace"`
-	RepositoryName string `json:"repository_name"`
-	TagName        string `json:"tag_name"`
-	Digest         string `json:"digest"`
+	registry       string
+	namespace      string
+	repositoryName string
+	tagName        string
+	digest         string
 
-	Metadata      *ImageMetadata      `json:"metadata"`
-	Configuration *types.ImageInspect `json:"configuration"`
+	metadata          *metadata
+	configuration     *types.ImageInspect
+	layerLocalFileMap map[string]string
 
-	LayerLocalFileMap map[string]string `json:"layer_local_file_map"`
+	Results *myutils.ImageResult
 }
 
-type ImageMetadata struct {
-	RepositoryMetadata *myutils.Repository `json:"repository_metadata"`
-	TagMetadata        *myutils.Tag        `json:"tag_metadata"`
-	ImageMetadata      *myutils.Image      `json:"image_metadata"`
+type metadata struct {
+	repositoryMetadata *myutils.Repository
+	tagMetadata        *myutils.Tag
+	imageMetadata      *myutils.Image
 }
 
 // Parse TODO: 解析指定镜像的元数据、配置信息，下载镜像，定位镜像的各个层
-func (curr *CurrentImage) Parse() {
+func (currI *CurrentImage) Parse() {
+	// 解析镜像配置信息，顺便检查image是否位于本地Docker环境中
+	if !currI.parseConfigurationFromDockerEnv() {
+		// 将镜像下载到本地
+		rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{})
+		if err != nil {
+			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "pull image", currI.name, "failed with:", err.Error())
+		} else {
+			defer rc.Close()
+		}
+	}
+}
+
+// ParsePartial TODO: 解析指定镜像的元数据
+func (currI *CurrentImage) ParsePartial() {
 
 }
 
-func (curr *CurrentImage) ParsePartial() {
-
+func (currI *CurrentImage) parseMetadata() {
+	// 数据库在线时，尝试从数据库中读取
 }
 
-func (curr *CurrentImage) parseConfigurationFromDockerEnv() {
-
+// parseConfigurationFromDockerEnv tries to inspect image from local env, with results
+// stored to currI.Configuration, formatted like `docker image inspect`.
+//
+// returns:
+//
+//	bool: whether image has been stored in local Docker env.
+func (currI *CurrentImage) parseConfigurationFromDockerEnv() bool {
+	if conf, _, err := currI.dockerClient.ImageInspectWithRaw(context.TODO(), currI.name); err != nil {
+		return false
+	} else {
+		currI.configuration = &conf
+		return true
+	}
 }

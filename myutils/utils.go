@@ -14,8 +14,8 @@ func GetLocalNowTime() string {
 	return time.Now().In(shanghai).Format(time.DateTime)
 }
 
-// CalSha256 对字符串计算sha256，并返回string
-func CalSha256(s string) string {
+// CalStrSha256 对字符串计算sha256，并返回string
+func CalStrSha256(s string) string {
 	tmpHash := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(tmpHash[:])
 }

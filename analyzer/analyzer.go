@@ -66,20 +66,27 @@ func (analyzer *ImageAnalyzer) loadRules(secretFile, sensParamFile string) error
 // AnalyzeImageByName analyzes image totally by name, including analyzing metadata,
 // configuration, content of the image.
 //
-// Image needs to be in the local Docker environment.
+// Image needs to be stored in the local Docker environment.
 func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) {
-	analyzer.CurrentImage = &CurrentImage{Name: name, DockerClient: analyzer.DockerClient}
+	analyzer.CurrentImage = &CurrentImage{name: name, dockerClient: analyzer.DockerClient}
 	// 解析镜像信息
 	analyzer.CurrentImage.Parse()
 }
 
-// AnalyzeMetadata analyzes metadata of repository, tag and image
+// AnalyzerImagePartialByName analyzes image partially by name, including only the metadata.
+//
+// This will never pull the layers of the image to local env.
+func (analyzer *ImageAnalyzer) AnalyzerImagePartialByName(name string) {
+
+}
+
+// AnalyzeMetadata analyzes metadata of repository, tag and image.
 func (analyzer *ImageAnalyzer) AnalyzeMetadata() {
 
 }
 
 // AnalyzeImageMetadata analyze instruction of layers to
-func (analyzer *ImageAnalyzer) AnalyzeImageMetadata(image *myutils.ImageOld) ([]*myutils.Issue, error) {
+func (analyzer *ImageAnalyzer) AnalyzeImageMetadata(image *myutils.Image) ([]*myutils.Issue, error) {
 	res := make([]*myutils.Issue, 0)
 
 	for index, layer := range image.Layers {
