@@ -16,11 +16,22 @@ type CurrentImage struct {
 	namespace      string
 	repositoryName string
 	tagName        string
+	architecture   string
+	variant        string
+	os             string
+	osVersion      string
 	digest         string
 
-	metadata          *metadata
-	configuration     *types.ImageInspect
-	layerLocalFileMap map[string]string
+	localFlag    bool
+	downloadFlag bool
+
+	// metadata of the repository, the tag and the image
+	metadata *metadata
+	// configuration of the image
+	configuration *types.ImageInspect
+	// content of the image
+	layerWithContentList []string
+	layerInfoMap         map[string]layerInfo
 
 	Results *myutils.ImageResult
 }
@@ -31,18 +42,57 @@ type metadata struct {
 	imageMetadata      *myutils.Image
 }
 
+type layerInfo struct {
+	size        int64
+	instruction string
+	digest      string
+	// localFilePath of the layer
+	localFilePath string
+}
+
 // Parse TODO: 解析指定镜像的元数据、配置信息，下载镜像，定位镜像的各个层
-func (currI *CurrentImage) Parse() {
-	// 解析镜像配置信息，顺便检查image是否位于本地Docker环境中
-	if !currI.parseConfigurationFromDockerEnv() {
+func (currI *CurrentImage) Parse() error {
+	// 解析镜像名称
+	currI.registry, currI.namespace, currI.repositoryName, currI.tagName = myutils.DivideImageName(currI.name)
+
+	// 获取元数据
+	if err := currI.parseMetadata(); err != nil {
+		myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "parse metadata of image", currI.name, "failed with:", err.Error())
+		return err
+	}
+
+	// 解析配置信息
+	// 检查image是否位于本地Docker环境中，如果不存在则下载镜像
+	if err := currI.parseConfigurationFromDockerEnv(); err != nil {
+		myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "inspect image", currI.name, "failed with:", err.Error())
+
 		// 将镜像下载到本地
+		// TODO: 目前是异步的，下面可能还是读不了
 		rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{})
+		myutils.LogDockerCrawlerString(myutils.LogLevel.Debug, "pulling image", currI.name)
 		if err != nil {
 			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "pull image", currI.name, "failed with:", err.Error())
 		} else {
+			// 下载成功
 			defer rc.Close()
+			currI.downloadFlag = true
+		}
+	} else {
+		currI.localFlag = true
+	}
+
+	// 下载后尝试解析镜像信息
+	if currI.downloadFlag {
+		if err := currI.parseConfigurationFromDockerEnv(); err != nil {
+			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "inspect image", currI.name, "failed with:", err.Error())
+		} else {
+			currI.localFlag = true
 		}
 	}
+
+	//
+
+	return nil
 }
 
 // ParsePartial TODO: 解析指定镜像的元数据
@@ -50,8 +100,34 @@ func (currI *CurrentImage) ParsePartial() {
 
 }
 
-func (currI *CurrentImage) parseMetadata() {
+// parseMetadata loads metadata of repository
+func (currI *CurrentImage) parseMetadata() error {
+	currI.metadata = new(metadata)
+
 	// 数据库在线时，尝试从数据库中读取
+
+	return nil
+}
+
+// getRepositoryMetadata gets repository metadata from local MongoDB,
+// if repository not maintained in MongoDB or disconnected from MongoDB,
+// try to get metadata from Docker Hub API and store metadata to MongoDB.
+func (currI *CurrentImage) getRepositoryMetadata() error {
+	return nil
+}
+
+// getTagMetadata gets tag metadata from local MongoDB, if tag not maintained
+// in MongoDB or disconnected from MongoDB, try to get metadata from Docker
+// Hub API and store metadata to MongoDB.
+func (currI *CurrentImage) getTagMetadata() error {
+	return nil
+}
+
+// getImageMetadata gets image metadata from local MongoDB, if image not
+// maintained in MongoDB or disconnected from MongoDB, try to get
+// metadata from Docker Hub API and store metadata to MongoDB.
+func (currI *CurrentImage) getImageMetadata() error {
+	return nil
 }
 
 // parseConfigurationFromDockerEnv tries to inspect image from local env, with results
@@ -60,11 +136,15 @@ func (currI *CurrentImage) parseMetadata() {
 // returns:
 //
 //	bool: whether image has been stored in local Docker env.
-func (currI *CurrentImage) parseConfigurationFromDockerEnv() bool {
+func (currI *CurrentImage) parseConfigurationFromDockerEnv() error {
+	// 从本地inspect读取镜像配置信息
 	if conf, _, err := currI.dockerClient.ImageInspectWithRaw(context.TODO(), currI.name); err != nil {
-		return false
+		return err
 	} else {
 		currI.configuration = &conf
-		return true
 	}
+
+	// TODO: 解析镜像的配置信息
+
+	return nil
 }
