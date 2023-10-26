@@ -57,7 +57,7 @@ func CalculateRepositoriesDependentWeights() {
 	// traverse all namespace/repository:tag to find amd64 image digest
 	cursor, err := myMongo.RepositoriesCollection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "mongo find cursor failed with:", err.Error())
+		myutils.Logger.Error("mongo find cursor failed with:", err.Error())
 		log.Fatalln(err)
 	}
 	for cursor.Next(context.TODO()) {
@@ -79,14 +79,14 @@ func CalculateRepositoriesDependentWeights() {
 			optSkip := options.Find().SetSkip(int64(cnt))
 			cursor, err = myMongo.RepositoriesCollection.Find(context.TODO(), bson.D{}, optSkip)
 			if err != nil {
-				myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "mongo find cursor failed with:", err.Error())
+				myutils.Logger.Error("mongo find cursor failed with:", err.Error())
 				log.Fatalln(err)
 			}
 
 			if cursor.Next(context.TODO()) {
 
 			} else {
-				myutils.LogDockerCrawlerString(myutils.LogLevel.Warn, "final document finish.")
+				myutils.Logger.Warn("final document finish.")
 				log.Fatalln("final document finish.")
 			}
 		}
@@ -99,22 +99,20 @@ func CalculateRepositoriesDependentWeights() {
 		curRepo := new(myutils.RepositoryOld)
 		err := cursor.Decode(curRepo)
 		if err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+			myutils.Logger.Error(err.Error())
 			continue
 		}
-		myutils.LogDockerCrawlerString(myutils.LogLevel.Info, "begin to calculate dependent weights of repository:",
-			curRepo.Namespace, curRepo.Name)
+		myutils.Logger.Info("begin to calculate dependent weights of repository:", curRepo.Namespace, curRepo.Name)
 
 		for tagName, tagMeta := range curRepo.Tags {
 			if arch, ok := tagMeta.Images["amd64"]; ok {
-				myutils.LogDockerCrawlerString(myutils.LogLevel.Debug, "find amd64 images in",
-					curRepo.Namespace, curRepo.Name, tagName)
+				myutils.Logger.Debug("find amd64 images in", curRepo.Namespace, curRepo.Name, tagName)
 
 				for _, imageDigest := range arch {
 
 					imageMeta, err := myMongo.FindImageByDigest(imageDigest)
 					if err != nil {
-						myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+						myutils.Logger.Error(err.Error())
 						continue
 					}
 
@@ -131,23 +129,23 @@ func CalculateRepositoriesDependentWeights() {
 					// calculate upstream and downstream images
 					upImages, err := myNeo4jDriver.FindUpstreamImagesByNodeId(accumulateHash)
 					if err != nil {
-						myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+						myutils.Logger.Error(err.Error())
 						upImages = []string{}
 					}
 					downImages, err := myNeo4jDriver.FindDownstreamImagesByNodeId(accumulateHash)
 					if err != nil {
-						myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+						myutils.Logger.Error(err.Error())
 						downImages = []string{}
 					}
 
 					// write results to result file
 					//upImagesStr, err := json.Marshal(upImages)
 					//if err != nil {
-					//	myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+					//	myutils.Logger.Error(err.Error())
 					//}
 					//downImagesStr, err := json.Marshal(downImages)
 					//if err != nil {
-					//	myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+					//	myutils.Logger.Error(err.Error())
 					//}
 
 					record := Record{
@@ -163,13 +161,12 @@ func CalculateRepositoriesDependentWeights() {
 
 					recordBytes, err := json.Marshal(record)
 					if err != nil {
-						myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+						myutils.Logger.Error(err.Error())
 					}
 					resultFile.Write(recordBytes)
 					resultFile.WriteString("\n")
 
-					myutils.LogDockerCrawlerString(myutils.LogLevel.Debug, "finish calculate for image:",
-						curRepo.Namespace, curRepo.Name, tagName, imageDigest)
+					myutils.Logger.Debug("finish calculate for image:", curRepo.Namespace, curRepo.Name, tagName, imageDigest)
 
 					//resultFile.WriteString(curRepo.Namespace + "," + curRepo.Name + "," + tagName + "," + imageDigest +
 					//	"," + strconv.Itoa(len(upImages)) + "," + strconv.Itoa(len(downImages)) + "," +
@@ -269,7 +266,7 @@ func StatisticRepositoriesDependentWeights() {
 
 		image, err := mymongo.FindImageByDigest(record.ImageDigest)
 		if err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "mongo find image by digest failed with:", err.Error())
+			myutils.Logger.Error("mongo find image by digest failed with:", err.Error())
 			continue
 		}
 		record.NodeId = myutils.CalculateImageNodeId(image)
@@ -291,11 +288,10 @@ func StatisticRepositoriesDependentWeights() {
 			fmt.Println("process record:", total)
 			fmt.Println("top 1 up:", top100Up[0].UpstreamImageCount, ", top 100 up:", top100Up[99].UpstreamImageCount)
 			fmt.Println("top 1 down:", top100Down[0].DownstreamImageCount, ", top 100 down:", top100Down[99].DownstreamImageCount)
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Info,
-				fmt.Sprintf("processing record: %d, top 1 up: %d, top 100 up: %d, top 1 down: %d, top 100 down: %d\n",
-					total, top100Up[0].UpstreamImageCount, top100Up[99].UpstreamImageCount,
-					top100Down[0].DownstreamImageCount, top100Down[99].DownstreamImageCount,
-				),
+			myutils.Logger.Info(fmt.Sprintf("processing record: %d, top 1 up: %d, top 100 up: %d, top 1 down: %d, top 100 down: %d\n",
+				total, top100Up[0].UpstreamImageCount, top100Up[99].UpstreamImageCount,
+				top100Down[0].DownstreamImageCount, top100Down[99].DownstreamImageCount,
+			),
 			)
 		}
 	}
@@ -309,7 +305,7 @@ func StatisticRepositoriesDependentWeights() {
 	for _, upRecord := range top100Up {
 		recordBytes, err := json.Marshal(upRecord)
 		if err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+			myutils.Logger.Error(err.Error())
 		}
 		upstreamFile.Write(recordBytes)
 		upstreamFile.WriteString("\n")
@@ -318,7 +314,7 @@ func StatisticRepositoriesDependentWeights() {
 	for _, downRecord := range top100Down {
 		recordBytes, err := json.Marshal(downRecord)
 		if err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, err.Error())
+			myutils.Logger.Error(err.Error())
 		}
 		downstreamFile.Write(recordBytes)
 		downstreamFile.WriteString("\n")
@@ -353,8 +349,7 @@ func readDependentWeightFileByLine() {
 				break
 			}
 			fmt.Println("[ERROR] Fail to ReadLine in /data/docker-crawler/results/dependent-weights.txt: Line", i, ", err:", err)
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error,
-				"Fail to ReadLine in /data/docker-crawler/results/dependent-weights.txt: Line",
+			myutils.Logger.Error("Fail to ReadLine in /data/docker-crawler/results/dependent-weights.txt: Line",
 				strconv.Itoa(i), "err:", err.Error())
 			break
 		}
@@ -364,7 +359,7 @@ func readDependentWeightFileByLine() {
 		err = json.Unmarshal(b, record)
 		if err != nil {
 			fmt.Println("[ERROR] json.Unmarshal failed with:", err)
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "json.Unmarshal failed with:", err.Error())
+			myutils.Logger.Error("json.Unmarshal failed with:", err.Error())
 			continue
 		}
 		chanRecord <- record
@@ -374,7 +369,7 @@ func readDependentWeightFileByLine() {
 		}
 	}
 	fmt.Println("File /data/docker-crawler/results/dependent-weights.txt Final Line, Total Time:", time.Since(beginTime))
-	myutils.LogDockerCrawlerString(myutils.LogLevel.Info, "load file /data/docker-crawler/results/dependent-weights.txt finished, total time:",
+	myutils.Logger.Info("load file /data/docker-crawler/results/dependent-weights.txt finished, total time:",
 		time.Since(beginTime).String(),
 	)
 }

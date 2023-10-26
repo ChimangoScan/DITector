@@ -26,13 +26,13 @@ func ScanAllSecretsInImageMetadata() {
 	mymongo, _ := myutils.ConfigMongoClient(false)
 	imageAnalyzer, err := analyzer.NewImageAnalyzerGlobalConfig()
 	if err != nil {
-		logself(myutils.LogLevel.Error, "load yaml rules failed with:", err.Error())
+		logself(myutils.LogLevelStr.Error, "load yaml rules failed with:", err.Error())
 		log.Fatalln(err)
 	}
 
 	cursor, err := mymongo.ImagesCollection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		logself(myutils.LogLevel.Error, "traverse images failed with:", err.Error())
+		logself(myutils.LogLevelStr.Error, "traverse images failed with:", err.Error())
 		log.Fatalln(err)
 	}
 	defer cursor.Close(context.TODO())
@@ -40,28 +40,28 @@ func ScanAllSecretsInImageMetadata() {
 
 	for cursor.Next(context.TODO()) {
 		cnt++
-		logself(myutils.LogLevel.Debug, "begin to scan", strconv.Itoa(cnt))
+		logself(myutils.LogLevelStr.Debug, "begin to scan", strconv.Itoa(cnt))
 
-		targetImage := new(myutils.ImageOld)
+		targetImage := new(myutils.Image)
 		err := cursor.Decode(targetImage)
 		if err != nil {
-			logself(myutils.LogLevel.Error, "decode image failed with:", err.Error())
+			logself(myutils.LogLevelStr.Error, "decode image failed with:", err.Error())
 			continue
 		}
 
 		imgres := new(myutils.ImageResult)
 		imgres.Digest = targetImage.Digest
-		imgres.LastAnalyzed = myutils.GetLocalNowTime()
+		imgres.LastAnalyzedTime = myutils.GetLocalNowTime()
 
 		imgres.Results, err = imageAnalyzer.AnalyzeImageMetadata(targetImage)
 		if err != nil {
-			logself(myutils.LogLevel.Error, "analyze metadata of image", imgres.Digest, "failed with:", err.Error())
+			logself(myutils.LogLevelStr.Error, "analyze metadata of image", imgres.Digest, "failed with:", err.Error())
 			continue
 		}
 
 		err = mymongo.InsertResult(imgres)
 		if err != nil {
-			logself(myutils.LogLevel.Error, "insert image result failed with:", err.Error())
+			logself(myutils.LogLevelStr.Error, "insert image result failed with:", err.Error())
 			continue
 		}
 	}
@@ -94,8 +94,7 @@ func ScanTop100DownstreamImagesVul() {
 		var record = new(RecordWithNodeID)
 		err = json.Unmarshal(b, record)
 		if err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error,
-				"json unmarshal failed with:", err.Error())
+			myutils.Logger.Error("json unmarshal failed with:", err.Error())
 			continue
 		}
 
@@ -109,8 +108,7 @@ func ScanTop100DownstreamImagesVul() {
 
 		cmd := exec.Command("/home/hequan/anchore/grype/grype", imageFullName, "-o", "json", "--file", resultPath)
 		if err = cmd.Run(); err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error,
-				"run shell command failed with:", err.Error())
+			myutils.Logger.Error("run shell command failed with:", err.Error())
 			fmt.Println("[ERROR] run shell command failed with:", err)
 		}
 

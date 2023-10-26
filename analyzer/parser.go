@@ -52,26 +52,31 @@ type layerInfo struct {
 
 // Parse TODO: 解析指定镜像的元数据、配置信息，下载镜像，定位镜像的各个层
 func (currI *CurrentImage) Parse() error {
-	// 解析镜像名称
-	currI.registry, currI.namespace, currI.repositoryName, currI.tagName = myutils.DivideImageName(currI.name)
+	// 解析镜像基本信息
+	currI.parseName()
+
+	// 获取当前平台
+	if err := currI.getServerPlatform(); err != nil {
+		myutils.Logger.Error("get Docker server platform failed with:", err.Error())
+	}
 
 	// 获取元数据
 	if err := currI.parseMetadata(); err != nil {
-		myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "parse metadata of image", currI.name, "failed with:", err.Error())
+		myutils.Logger.Error("parse metadata of image", currI.name, "failed with:", err.Error())
 		return err
 	}
 
 	// 解析配置信息
 	// 检查image是否位于本地Docker环境中，如果不存在则下载镜像
 	if err := currI.parseConfigurationFromDockerEnv(); err != nil {
-		myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "inspect image", currI.name, "failed with:", err.Error())
+		myutils.Logger.Error("inspect image", currI.name, "failed with:", err.Error())
 
 		// 将镜像下载到本地
 		// TODO: 目前是异步的，下面可能还是读不了
 		rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{})
-		myutils.LogDockerCrawlerString(myutils.LogLevel.Debug, "pulling image", currI.name)
+		myutils.Logger.Debug("pulling image", currI.name)
 		if err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "pull image", currI.name, "failed with:", err.Error())
+			myutils.Logger.Error("pull image", currI.name, "failed with:", err.Error())
 		} else {
 			// 下载成功
 			defer rc.Close()
@@ -84,7 +89,7 @@ func (currI *CurrentImage) Parse() error {
 	// 下载后尝试解析镜像信息
 	if currI.downloadFlag {
 		if err := currI.parseConfigurationFromDockerEnv(); err != nil {
-			myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "inspect image", currI.name, "failed with:", err.Error())
+			myutils.Logger.Error("inspect image", currI.name, "failed with:", err.Error())
 		} else {
 			currI.localFlag = true
 		}
@@ -100,11 +105,38 @@ func (currI *CurrentImage) ParsePartial() {
 
 }
 
+// parseName parses registry, namespace, repository, tag of the image according to name.
+func (currI *CurrentImage) parseName() {
+	currI.registry, currI.namespace, currI.repositoryName, currI.tagName = myutils.DivideImageName(currI.name)
+}
+
+// getServerPlatform gets platform of the host with Docker client.
+func (currI *CurrentImage) getServerPlatform() error {
+	if plf, err := currI.dockerClient.ServerVersion(context.TODO()); err != nil {
+		return err
+	} else {
+		currI.architecture, currI.os = plf.Arch, plf.Os
+	}
+
+	return nil
+}
+
 // parseMetadata loads metadata of repository
 func (currI *CurrentImage) parseMetadata() error {
+	var err error
 	currI.metadata = new(metadata)
 
-	// 数据库在线时，尝试从数据库中读取
+	if currI.metadata.repositoryMetadata, err = currI.getRepositoryMetadata(); err != nil {
+		return err
+	}
+
+	if err := currI.getTagMetadata(); err != nil {
+		return err
+	}
+
+	if err := currI.getImageMetadata(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -112,21 +144,25 @@ func (currI *CurrentImage) parseMetadata() error {
 // getRepositoryMetadata gets repository metadata from local MongoDB,
 // if repository not maintained in MongoDB or disconnected from MongoDB,
 // try to get metadata from Docker Hub API and store metadata to MongoDB.
-func (currI *CurrentImage) getRepositoryMetadata() error {
+func (currI *CurrentImage) getRepositoryMetadata() (*myutils.Repository, error) {
+	// 数据库在线
+	if myutils.GlobalDBClient.MongoFlag {
+		if
+	}
 	return nil
 }
 
 // getTagMetadata gets tag metadata from local MongoDB, if tag not maintained
 // in MongoDB or disconnected from MongoDB, try to get metadata from Docker
 // Hub API and store metadata to MongoDB.
-func (currI *CurrentImage) getTagMetadata() error {
+func (currI *CurrentImage) getTagMetadata() (*myutils.Tag, error) {
 	return nil
 }
 
 // getImageMetadata gets image metadata from local MongoDB, if image not
 // maintained in MongoDB or disconnected from MongoDB, try to get
 // metadata from Docker Hub API and store metadata to MongoDB.
-func (currI *CurrentImage) getImageMetadata() error {
+func (currI *CurrentImage) getImageMetadata() (*myutils.Image, error) {
 	return nil
 }
 

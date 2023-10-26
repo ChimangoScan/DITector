@@ -85,7 +85,7 @@ func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(image *ImageSource) {
 		// 插入层及层间的边
 		_, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, previousHash, accumulateHash, curLayer))
 		if err != nil {
-			LogDockerCrawlerString(LogLevel.Error, "Insert", imageName, "layer", layerID, "to neo4j failed with:", err.Error())
+			Logger.Error("Insert", imageName, "layer", layerID, "to neo4j failed with:", err.Error())
 			fmt.Printf("[ERROR] Insert "+imageName+" layer "+layerID+" to neo4j failed with: %s\n", err)
 			break
 		}
@@ -99,7 +99,7 @@ func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(image *ImageSource) {
 	// 需要将image信息加入到节点属性中
 	_, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imageName, accumulateHash))
 	if err != nil {
-		LogDockerCrawlerString(fmt.Sprintf("[ERROR] Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s", err))
+		Logger.Error(fmt.Sprintf("Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s", err))
 		fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s\n", err)
 	}
 }
@@ -261,7 +261,7 @@ func (neo4jDriver *MyNeo4j) FindUpstreamLayerNodesByNodeId(nodeId string) (any, 
 
 	upNodes, err := session.ExecuteRead(ctx, findUpstreamNodesByNodeIdFunc(ctx, nodeId))
 	if err != nil {
-		LogDockerCrawlerString("[ERROR] Neo4j find upstream LayerSource nodes by node id", nodeId, "failed with:", err.Error())
+		Logger.Error("Neo4j find upstream LayerSource nodes by node id", nodeId, "failed with:", err.Error())
 		return nil, err
 	}
 
@@ -299,7 +299,7 @@ func (neo4jDriver *MyNeo4j) FindDownstreamLayerNodesByNodeId(nodeId string) (any
 
 	upNodes, err := session.ExecuteRead(ctx, findDownstreamNodesByNodeIdFunc(ctx, nodeId))
 	if err != nil {
-		LogDockerCrawlerString("[ERROR] Neo4j find downstream LayerSource nodes by node id", nodeId, "failed with:", err.Error())
+		Logger.Error("Neo4j find downstream LayerSource nodes by node id", nodeId, "failed with:", err.Error())
 		return nil, err
 	}
 

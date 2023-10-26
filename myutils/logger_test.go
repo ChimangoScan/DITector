@@ -6,10 +6,10 @@ import (
 )
 
 func TestLogDockerCrawlerString(t *testing.T) {
-	LogDockerCrawlerString(LogLevel.Error, "this is error")
-	LogDockerCrawlerString(LogLevel.Warn, "this is warn")
-	LogDockerCrawlerString(LogLevel.Info, "this is info")
-	LogDockerCrawlerString(LogLevel.Debug, "this is debug")
+	Logger.Error("this is error")
+	Logger.Warn("this is warn")
+	Logger.Info("this is info")
+	Logger.Debug("this is debug")
 }
 
 func TestGetLocalNowTime(t *testing.T) {

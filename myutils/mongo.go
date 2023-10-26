@@ -174,3 +174,71 @@ func NewMongo(uri, database, repositories, tags, images, results string, initFla
 
 	return mymongo, nil
 }
+
+func (m *MyMongo) FindRepositoryByName(namespace, name string) (*Repository, error) {
+	rMeta := new(Repository)
+
+	filter := bson.M{}
+	if namespace != "" {
+		filter["namespace"] = namespace
+	}
+	if name != "" {
+		filter["name"] = name
+	}
+
+	err := m.RepositoriesCollection.FindOne(context.Background(), filter).Decode(rMeta)
+
+	return rMeta, err
+}
+
+func (m *MyMongo) FindTagByName(repoNamespace, repoName, name string) (*Tag, error) {
+	tMeta := new(Tag)
+
+	// 按照流程一定是有值的
+	filter := bson.M{
+		"repositories_namespace": repoNamespace,
+		"repositories_name":      repoName,
+		"name":                   name,
+	}
+	pipeline := []bson.M{
+		bson.M{
+			"$match": {
+				"repositories_name": "mongo",
+				"repositories_namespace": "library",
+			}
+		},
+		bson.M{
+			"$project": {
+				"last_updated_time": {
+					"$dateFromString": {
+						"dateString": "$last_updated",
+					},
+				},
+			}
+		},
+		bson.M{
+			"$sort": {
+				"last_updated_time": -1,
+			}
+		},
+		bson.M{
+			"$limit": 1,
+		},
+	}
+
+	cursor, err := m.TagsCollection.Aggregate(context.Background(), pipeline)
+
+	return tMeta, err
+}
+
+func (m *MyMongo) FindImageByDigest(digest string) (*Image, error) {
+	iMeta := new(Image)
+
+	filter := bson.M{
+		"digest": digest,
+	}
+
+	err := m.ImagesCollection.FindOne(context.Background(), filter).Decode(iMeta)
+
+	return iMeta, err
+}

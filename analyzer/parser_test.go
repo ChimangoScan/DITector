@@ -8,6 +8,10 @@ import (
 func TestParse(t *testing.T) {
 	ci := CurrentImage{dockerClient: imageAnalyzer.DockerClient, name: "curlimages/curl:latest"}
 	ci.Parse()
+
+	// 查看系统平台
+	fmt.Println(ci.architecture, ci.os)
+
 	// 查看元数据信息
 	fmt.Println(ci.metadata.repositoryMetadata)
 

@@ -44,7 +44,7 @@ func StoreRepositoryScheduler() {
 			if mongo.IsDuplicateKeyError(err) {
 				//fmt.Println("[WARN] Mongo Duplicate when inserting repository", repo.Namespace, repo.RepositoryName, ", repository already exists")
 			} else {
-				myutils.LogDockerCrawlerString("[ERROR] Mongo insert repository", repo.Namespace+"/"+repo.Name, "failed with err:", err.Error())
+				myutils.Logger.Error("Mongo insert repository", repo.Namespace+"/"+repo.Name, "failed with err:", err.Error())
 			}
 		}
 	}
@@ -55,7 +55,7 @@ func StoreTagScheduler() {
 	for tag := range chanTag {
 		err := myMongo.InsertTag(tag)
 		if err != nil {
-			myutils.LogDockerCrawlerString("[ERROR] Mongo insert tag", tag.Namespace+"/"+tag.RepositoryName+"/"+tag.Name, "failed with err:", err.Error())
+			myutils.Logger.Error("Mongo insert tag", tag.Namespace+"/"+tag.RepositoryName+"/"+tag.Name, "failed with err:", err.Error())
 		}
 	}
 	chanDoneTag <- struct{}{}
@@ -68,7 +68,7 @@ func StoreImageScheduler() {
 			if mongo.IsDuplicateKeyError(err) {
 				//fmt.Println("[WARN] Mongo Duplicate when inserting repository", repo.Namespace, repo.RepositoryName, ", repository already exists")
 			} else {
-				myutils.LogDockerCrawlerString("[ERROR] Mongo insert image", image.Image.Digest, "failed with err:"+err.Error())
+				myutils.Logger.Error("Mongo insert image", image.Image.Digest, "failed with err:"+err.Error())
 			}
 		}
 		myNeo4jDriver.InsertImageToNeo4j(image)

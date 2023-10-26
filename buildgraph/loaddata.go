@@ -59,7 +59,7 @@ func ReadFileRepositoryByLine() {
 		}
 	}
 	fmt.Println("File RepositoryName Final Line, Total Time:", time.Since(beginTime))
-	myutils.LogDockerCrawlerString(fmt.Sprintf("[INFO] Load File RepositoryName Finished, Total Time:%s", time.Since(beginTime)))
+	myutils.Logger.Info(fmt.Sprintf("Load File RepositoryName Finished, Total Time:%s", time.Since(beginTime)))
 }
 
 // ReadFileTagsByLine 用于逐行读取fileTags，并将结果转换为Tag
@@ -85,7 +85,7 @@ func ReadFileTagsByLine() {
 				break
 			}
 			fmt.Println("[ERROR] Fail to ReadLine in ReadFileTagsByLine: Line ", i, ", err: ", err)
-			myutils.LogDockerCrawlerString("[ERROR] Fail to ReadLine in ReadFileTagsByLine: Line " + strconv.Itoa(i) + ", err: " + err.Error())
+			myutils.Logger.Error("Fail to ReadLine in ReadFileTagsByLine: Line", strconv.Itoa(i), ", err:", err.Error())
 			break
 		}
 
@@ -103,7 +103,7 @@ func ReadFileTagsByLine() {
 		}
 	}
 	fmt.Println("File Tags Final Line, Total Time:", time.Since(beginTime))
-	myutils.LogDockerCrawlerString(fmt.Sprintf("[INFO] Load File Tags Finished, Total Time:%s", time.Since(beginTime)))
+	myutils.Logger.Info(fmt.Sprintf("Load File Tags Finished, Total Time:%s", time.Since(beginTime)))
 }
 
 // ReadFileImagesByLine 用于逐行读取fileImages，并将结果转换为Image
@@ -146,5 +146,5 @@ func ReadFileImagesByLine() {
 		}
 	}
 	fmt.Println("File Images Final Line, Total Time:", time.Since(beginTime))
-	myutils.LogDockerCrawlerString(fmt.Sprintf("[INFO] Load File Images Finished, Total Time:%s", time.Since(beginTime)))
+	myutils.Logger.Info(fmt.Sprintf("Load File Images Finished, Total Time:%s", time.Since(beginTime)))
 }

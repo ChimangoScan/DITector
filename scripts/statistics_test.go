@@ -19,7 +19,7 @@ func TestCalculateRepositoriesDependentWeights(t *testing.T) {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	myNeo4jDriver, err := myutils.NewNeo4jDriver("neo4j://localhost:7687", "neo4j", "qazwsxedc")
+	myNeo4jDriver, err := myutils.NewNeo4jDriver("neo4j://localhost:7687", "neo4j", "qazwsxedc", false)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -33,7 +33,7 @@ func TestCalculateRepositoriesDependentWeights(t *testing.T) {
 	cnt := 0
 
 	// traverse all namespace/repository:tag to find amd64 image digest
-	cursor, err := myMongo.RepositoriesCollection.Find(context.TODO(), bson.D{})
+	cursor, err := myutils.GlobalDBClient.Mongo.RepositoriesCollection.Find(context.TODO(), bson.D{})
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -48,7 +48,7 @@ func TestCalculateRepositoriesDependentWeights(t *testing.T) {
 			if err != nil {
 				log.Fatalln(err)
 			}
-			myNeo4jDriver, err = myutils.NewNeo4jDriver("neo4j://localhost:7687", "neo4j", "qazwsxedc")
+			myNeo4jDriver, err = myutils.NewNeo4jDriver("neo4j://localhost:7687", "neo4j", "qazwsxedc", false)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -56,14 +56,14 @@ func TestCalculateRepositoriesDependentWeights(t *testing.T) {
 			optSkip := options.Find().SetSkip(int64(cnt))
 			cursor, err = myMongo.RepositoriesCollection.Find(context.TODO(), bson.D{}, optSkip)
 			if err != nil {
-				myutils.LogDockerCrawlerString(myutils.LogLevel.Error, "mongo find cursor failed with:", err.Error())
+				myutils.Logger.Error("mongo find cursor failed with:", err.Error())
 				log.Fatalln(err)
 			}
 
 			if cursor.Next(context.TODO()) {
 
 			} else {
-				myutils.LogDockerCrawlerString(myutils.LogLevel.Warn, "final document finish.")
+				myutils.Logger.Warn("final document finish.")
 				log.Fatalln("final document finish.")
 			}
 		}
