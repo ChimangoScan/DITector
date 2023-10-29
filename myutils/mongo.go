@@ -336,6 +336,19 @@ func (m *MyMongo) FindTagByName(repoNamespace, repoName, name string) (*Tag, err
 	return tMeta, err
 }
 
+func (m *MyMongo) UpdateImage(iMeta *Image) error {
+	filter := bson.M{
+		"digest": iMeta.Digest,
+	}
+	update := bson.M{
+		"$set": iMeta,
+	}
+	opts := options.Update().SetUpsert(true)
+
+	_, err := m.ImagesCollection.UpdateOne(context.TODO(), filter, update, opts)
+	return err
+}
+
 func (m *MyMongo) FindImageByDigest(digest string) (*Image, error) {
 	iMeta := new(Image)
 

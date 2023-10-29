@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"log"
 	"testing"
 )
 
@@ -24,5 +25,18 @@ func TestParse(t *testing.T) {
 
 func TestParseMetadata(t *testing.T) {
 	ci := CurrentImage{dockerClient: imageAnalyzer.DockerClient, name: "curlimages/curl:latest"}
-	ci.parseMetadata()
+	ci.parseName()
+	ci.getServerPlatform()
+
+	if err := ci.parseMetadata(true); err != nil {
+		log.Fatalln("parse metadata failed with:", err)
+	}
+
+	fmt.Println(ci.architecture, ci.os)
+
+	fmt.Println(ci.metadata.repositoryMetadata.Namespace, ci.metadata.repositoryMetadata.Name)
+
+	fmt.Println(ci.metadata.tagMetadata.Name, ci.metadata.tagMetadata.LastUpdated)
+
+	fmt.Println(ci.metadata.imageMetadata.Digest)
 }
