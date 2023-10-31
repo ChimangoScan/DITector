@@ -1,10 +1,33 @@
 package analyzer
 
 import (
+	"context"
 	"fmt"
+	"github.com/docker/docker/api/types"
+	"io"
 	"log"
 	"testing"
 )
+
+func TestImagePull(t *testing.T) {
+	irc, err := imageAnalyzer.DockerClient.ImagePull(context.TODO(), "alpine:3", types.ImagePullOptions{})
+	if err != nil {
+		log.Fatalln("pull image got error:", err)
+	}
+	defer irc.Close()
+
+	b, _ := io.ReadAll(irc)
+	fmt.Println(string(b))
+}
+
+func TestDownloadImage(t *testing.T) {
+	ci := CurrentImage{dockerClient: imageAnalyzer.DockerClient, name: "alpine:3"}
+	ch := make(chan bool)
+	go ci.downloadImage(ch)
+
+	b := <-ch
+	fmt.Println(b)
+}
 
 func TestParse(t *testing.T) {
 	ci := CurrentImage{dockerClient: imageAnalyzer.DockerClient, name: "curlimages/curl:latest"}
@@ -26,7 +49,7 @@ func TestParse(t *testing.T) {
 func TestParseMetadata(t *testing.T) {
 	ci := CurrentImage{dockerClient: imageAnalyzer.DockerClient, name: "curlimages/curl:latest"}
 	ci.parseName()
-	ci.getServerPlatform()
+	ci.parseServerPlatform()
 
 	if err := ci.parseMetadata(true); err != nil {
 		log.Fatalln("parse metadata failed with:", err)

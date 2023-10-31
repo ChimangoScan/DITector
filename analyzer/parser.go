@@ -2,10 +2,13 @@ package analyzer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
+	"io"
 	"myutils"
+	"strings"
 )
 
 type CurrentImage struct {
@@ -23,9 +26,6 @@ type CurrentImage struct {
 	osVersion      string
 	digest         string
 
-	localFlag    bool
-	downloadFlag bool
-
 	// metadata of the repository, the tag and the image
 	metadata *metadata
 	// configuration of the image
@@ -33,8 +33,6 @@ type CurrentImage struct {
 	// content of the image
 	layerWithContentList []string
 	layerInfoMap         map[string]layerInfo
-
-	Results *myutils.ImageResult
 }
 
 type metadata struct {
@@ -51,260 +49,69 @@ type layerInfo struct {
 	localFilePath string
 }
 
-// Parse TODO: 解析指定镜像的元数据、配置信息，下载镜像，定位镜像的各个层
-func (currI *CurrentImage) Parse() error {
-	// 解析镜像基本信息
-	currI.parseName()
+func NewCurrentImage() (*CurrentImage, error) {
+	currI := new(CurrentImage)
+	var err error
 
-	// 获取当前Docker server环境所在的平台信息
-	if err := currI.getServerPlatform(); err != nil {
-		myutils.Logger.Error("get Docker server platform failed with:", err.Error())
+	currI.dockerClient, err = client.NewClientWithOpts(client.FromEnv)
+	if err != nil {
+		return nil, err
 	}
 
-	// 获取元数据
-	if err := currI.parseMetadata(false); err != nil {
-		return err
-	}
-
-	// 解析配置信息
-	// 检查image是否位于本地Docker环境中，如果不存在则下载镜像
-	if err := currI.parseConfigurationFromDockerEnv(); err != nil {
-		myutils.Logger.Error("inspect image", currI.name, "failed with:", err.Error())
-
-		// 将镜像下载到本地
-		// TODO: 目前是异步的，下面可能还是读不了
-		rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{})
-		myutils.Logger.Debug("pulling image", currI.name)
-		if err != nil {
-			myutils.Logger.Error("pull image", currI.name, "failed with:", err.Error())
-		} else {
-			// 下载成功
-			defer rc.Close()
-			currI.downloadFlag = true
-		}
-	} else {
-		currI.localFlag = true
-	}
-
-	// 下载后尝试解析镜像信息
-	if currI.downloadFlag {
-		if err := currI.parseConfigurationFromDockerEnv(); err != nil {
-			myutils.Logger.Error("inspect image", currI.name, "failed with:", err.Error())
-		} else {
-			currI.localFlag = true
-		}
-	}
-
-	//
-
-	return nil
-}
-
-// ParsePartial TODO: 解析指定镜像的元数据
-func (currI *CurrentImage) ParsePartial() {
-
-}
-
-// parseName parses registry, namespace, repository, tag of the image according to name.
-func (currI *CurrentImage) parseName() {
-	currI.registry, currI.namespace, currI.repositoryName, currI.tagName = myutils.DivideImageName(currI.name)
-}
-
-// getServerPlatform gets platform of the host with Docker client.
-func (currI *CurrentImage) getServerPlatform() error {
-	if plf, err := currI.dockerClient.ServerVersion(context.TODO()); err != nil {
-		return err
-	} else {
-		currI.architecture, currI.os = plf.Arch, plf.Os
-	}
-
-	return nil
-}
-
-// parseMetadata loads metadata of repository
-func (currI *CurrentImage) parseMetadata(partial bool) (err error) {
 	currI.metadata = new(metadata)
+	currI.layerWithContentList = make([]string, 0)
+	currI.layerInfoMap = make(map[string]layerInfo)
+	currI.Result = myutils.NewImageResult()
 
-	if currI.metadata.repositoryMetadata, err = currI.getRepositoryMetadata(); err != nil {
-		myutils.Logger.Error("parse repository metadata of image", currI.name, "failed with:", err.Error())
-		return err
-	}
-
-	if currI.metadata.tagMetadata, err = currI.getTagMetadata(); err != nil {
-		myutils.Logger.Error("parse tag metadata of image", currI.name, "failed with:", err.Error())
-		return err
-	}
-
-	if partial {
-		if currI.metadata.imageMetadata, err = currI.getImageMetadata(); err != nil {
-			myutils.Logger.Error("parse image metadata of image", currI.name, "failed with:", err.Error())
-			return err
-		}
-	}
-
-	return nil
+	return currI, nil
 }
 
-// getRepositoryMetadata gets repository metadata from local MongoDB,
-// if repository not maintained in MongoDB or disconnected from MongoDB,
-// try to get metadata from Docker Hub API and store metadata to MongoDB.
-func (currI *CurrentImage) getRepositoryMetadata() (rMeta *myutils.Repository, err error) {
-	// 数据库在线，尝试从数据库读取
-	if myutils.GlobalDBClient.MongoFlag {
-		if rMeta, err = myutils.GlobalDBClient.Mongo.FindRepositoryByName(currI.namespace, currI.repositoryName); err != nil {
-			// 数据库中不存在，从API获取metadata
-			rMeta, err = myutils.ReqRepoMetadata(currI.namespace, currI.repositoryName)
-			if err != nil {
-				return
-			}
+type ImagePullEvent struct {
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	ProgressDetail struct {
+		Current int64 `json:"current"`
+		Total   int64 `json:"total"`
+	} `json:"progressDetail"`
+	Progress string `json:"progress"`
+}
 
-			// API结果正常，存入数据库，存数据库过程的error不需要返回
-			if e := myutils.GlobalDBClient.Mongo.UpdateRepository(rMeta); e != nil {
-				myutils.Logger.Error("update metadata of repository", currI.namespace, currI.repositoryName, "failed with:", e.Error())
-			}
-		} else {
-			// 数据库获取正常，直接返回
-			return
-		}
-	} else {
-		fmt.Println("mongo not online, getting repository metadata from API")
-		// 数据库不在线，从API获取metadata并返回
-		rMeta, err = myutils.ReqRepoMetadata(currI.namespace, currI.repositoryName)
+// downloadImage calls client.Client.ImagePull to downloads image.
+// It turns ImagePull progress from async to sync with a non-buffered chan.
+func (currI *CurrentImage) downloadImage(ch chan<- bool) {
+	myutils.Logger.Debug("start pulling image", currI.name)
+	rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{})
+	if err != nil {
+		myutils.Logger.Error("pull image", currI.name, "failed with:", err.Error())
+		ch <- false
 		return
 	}
-	return
-}
+	defer rc.Close()
 
-// getTagMetadata gets tag metadata from local MongoDB, if tag not maintained
-// in MongoDB or disconnected from MongoDB, try to get metadata from Docker
-// Hub API and store metadata to MongoDB.
-func (currI *CurrentImage) getTagMetadata() (tMeta *myutils.Tag, err error) {
-	// 数据库在线，尝试从数据库读取
-	if myutils.GlobalDBClient.MongoFlag {
-		if tMeta, err = myutils.GlobalDBClient.Mongo.FindTagByName(currI.namespace, currI.repositoryName, currI.tagName); err != nil {
-			// 数据库中不存在，从API获取metadata
-			tMeta, err = myutils.ReqTagMetadata(currI.namespace, currI.repositoryName, currI.tagName)
-			if err != nil {
-				return
-			}
+	pullFlag := false
 
-			// API结果正常，存入数据库，存数据库过程的error不需要返回
-			if e := myutils.GlobalDBClient.Mongo.UpdateTag(tMeta); e != nil {
-				myutils.Logger.Error("update metadata of tag", currI.namespace, currI.repositoryName, currI.tagName, "failed with:", e.Error())
-			}
-		} else {
-			// 数据库获取正常，直接返回
-			return
-		}
-	} else {
-		fmt.Println("mongo not online, getting tag metadata from API")
-		// 数据库不在线，从API获取metadata并返回
-		tMeta, err = myutils.ReqTagMetadata(currI.namespace, currI.repositoryName, currI.tagName)
-		return
-	}
-	return
-}
-
-// getImageMetadata gets image metadata from local MongoDB, if image not
-// maintained in MongoDB or disconnected from MongoDB, try to get
-// metadata from Docker Hub API and store metadata to MongoDB.
-func (currI *CurrentImage) getImageMetadata() (iMeta *myutils.Image, err error) {
-	// 检查是否有architecture和os记录
-	if currI.architecture == "" || currI.os == "" {
-		return nil, fmt.Errorf("no architecture or os parsed in current image")
-	}
-
-	// 根据arch, os匹配tag元数据中的镜像digest
-	for _, iit := range currI.metadata.tagMetadata.Images {
-		// 命中arch和os时覆盖digest
-		if currI.architecture == iit.Architecture && currI.os == iit.OS {
-			currI.digest = iit.Digest
-			// 信息全部命中时直接退出
-			if currI.variant == iit.Variant && currI.osVersion == iit.OSVersion {
+	decoder := json.NewDecoder(rc)
+	for {
+		event := new(ImagePullEvent)
+		if err := decoder.Decode(event); err != nil {
+			if err == io.EOF {
 				break
 			}
+			myutils.Logger.Error("decode JSON when pulling image", currI.name, "failed with:", err.Error())
+		}
+		fmt.Println(event)
+		if strings.Contains(event.Status, "Downloaded newer image for") ||
+			strings.Contains(event.Status, "Image is up to date") {
+			pullFlag = true
 		}
 	}
 
-	if currI.digest == "" {
-		return nil, fmt.Errorf("no image with the same platform %s was found in tag %s metadata",
-			currI.os+"/"+currI.architecture, currI.registry+"/"+currI.namespace+"/"+currI.repositoryName+":"+currI.tagName)
-	}
-
-	// 数据库在线，尝试从数据库读取
-	if myutils.GlobalDBClient.MongoFlag {
-		if iMeta, err = myutils.GlobalDBClient.Mongo.FindImageByDigest(currI.digest); err != nil {
-			// 数据库中不存在，从API获取images metadata
-			var isMeta []*myutils.Image
-			isMeta, err = myutils.ReqImagesMetadata(currI.namespace, currI.repositoryName, currI.tagName)
-			if err != nil {
-				return
-			}
-
-			// 根据digest匹配对应的image metadata
-			for _, iit := range isMeta {
-				if currI.digest == iit.Digest {
-					iMeta = iit
-					break
-				}
-			}
-
-			if iMeta == nil {
-				return nil, fmt.Errorf("no image with the same platform %s was found in tag %s metadata",
-					currI.os+"/"+currI.architecture, currI.registry+"/"+currI.namespace+"/"+currI.repositoryName+":"+currI.tagName)
-			}
-
-			// API结果正常，存入数据库，存数据库过程的error不需要返回
-			if e := myutils.GlobalDBClient.Mongo.UpdateImage(iMeta); e != nil {
-				myutils.Logger.Error("update metadata of image", currI.digest, "failed with:", e.Error())
-			}
-		} else {
-			// 数据库获取正常，直接返回
-			return
-		}
+	if pullFlag {
+		myutils.Logger.Debug("pull image", currI.name, "succeeded")
+		ch <- true
 	} else {
-		fmt.Println("mongo not online, getting image metadata from API")
-		// 数据库不在线，从API获取metadata并返回
-		var isMeta []*myutils.Image
-		isMeta, err = myutils.ReqImagesMetadata(currI.namespace, currI.repositoryName, currI.tagName)
-		if err != nil {
-			return
-		}
-
-		// 根据digest匹配对应的image metadata
-		for _, iit := range isMeta {
-			if currI.digest == iit.Digest {
-				iMeta = iit
-				break
-			}
-		}
-
-		if iMeta == nil {
-			return nil, fmt.Errorf("no image with the same platform %s was found in tag %s metadata",
-				currI.os+"/"+currI.architecture, currI.registry+"/"+currI.namespace+"/"+currI.repositoryName+":"+currI.tagName)
-		}
-
-		return
+		ch <- false
 	}
 
 	return
-}
-
-// parseConfigurationFromDockerEnv tries to inspect image from local env, with results
-// stored to currI.Configuration, formatted like `docker image inspect`.
-//
-// returns:
-//
-//	bool: whether image has been stored in local Docker env.
-func (currI *CurrentImage) parseConfigurationFromDockerEnv() error {
-	// 从本地inspect读取镜像配置信息
-	if conf, _, err := currI.dockerClient.ImageInspectWithRaw(context.TODO(), currI.name); err != nil {
-		return err
-	} else {
-		currI.configuration = &conf
-	}
-
-	// TODO: 解析镜像的配置信息
-
-	return nil
 }

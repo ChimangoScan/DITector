@@ -1,15 +1,14 @@
 package analyzer
 
 import (
-	"github.com/docker/docker/client"
 	"myutils"
 	"strconv"
 )
 
 type ImageAnalyzer struct {
-	DockerClient *client.Client
-	rules        *ImageAnalyzerRules
-	CurrentImage *CurrentImage
+	rules         *ImageAnalyzerRules
+	CurrentImage  *CurrentImage
+	CurrentResult *myutils.ImageResult
 }
 
 // NewImageAnalyzerGlobalConfig creates a new ImageAnalyzer configured based on config.json
@@ -27,12 +26,6 @@ func NewImageAnalyzerGlobalConfig() (*ImageAnalyzer, error) {
 func NewImageAnalyzer(secretFile, sensParamFile string) (*ImageAnalyzer, error) {
 	analyzer := new(ImageAnalyzer)
 	var err error
-
-	// 连接本地Docker环境
-	analyzer.DockerClient, err = client.NewClientWithOpts(client.FromEnv)
-	if err != nil {
-		return nil, err
-	}
 
 	// 初始化成员变量
 	analyzer.rules = newImageAnalyzerRules()
@@ -68,7 +61,13 @@ func (analyzer *ImageAnalyzer) loadRules(secretFile, sensParamFile string) error
 //
 // Image needs to be stored in the local Docker environment.
 func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) {
-	analyzer.CurrentImage = &CurrentImage{name: name, dockerClient: analyzer.DockerClient}
+	var err error
+
+	analyzer.CurrentImage, err = NewCurrentImage()
+	if err != nil {
+		myutils.Logger.Error("")
+		return
+	}
 	// 解析镜像信息
 	analyzer.CurrentImage.Parse()
 }
