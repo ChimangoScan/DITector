@@ -61,7 +61,6 @@ func NewCurrentImage() (*CurrentImage, error) {
 	currI.metadata = new(metadata)
 	currI.layerWithContentList = make([]string, 0)
 	currI.layerInfoMap = make(map[string]layerInfo)
-	currI.Result = myutils.NewImageResult()
 
 	return currI, nil
 }
@@ -76,9 +75,9 @@ type ImagePullEvent struct {
 	Progress string `json:"progress"`
 }
 
-// downloadImage calls client.Client.ImagePull to downloads image.
+// pullImage calls client.Client.ImagePull to downloads image.
 // It turns ImagePull progress from async to sync with a non-buffered chan.
-func (currI *CurrentImage) downloadImage(ch chan<- bool) {
+func (currI *CurrentImage) pullImage(ch chan<- bool) {
 	myutils.Logger.Debug("start pulling image", currI.name)
 	rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{})
 	if err != nil {

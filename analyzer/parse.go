@@ -11,7 +11,7 @@ func (currI *CurrentImage) Parse() (err error) {
 	downloadChan := make(chan bool)
 
 	// 新开goroutine下载镜像
-	go currI.downloadImage(downloadChan)
+	go currI.pullImage(downloadChan)
 
 	// 解析镜像基本信息
 	currI.parseName()

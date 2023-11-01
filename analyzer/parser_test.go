@@ -23,7 +23,7 @@ func TestImagePull(t *testing.T) {
 func TestDownloadImage(t *testing.T) {
 	ci := CurrentImage{dockerClient: imageAnalyzer.DockerClient, name: "alpine:3"}
 	ch := make(chan bool)
-	go ci.downloadImage(ch)
+	go ci.pullImage(ch)
 
 	b := <-ch
 	fmt.Println(b)

@@ -17,6 +17,7 @@ var GlobalConfig struct {
 	TagsFile         string        `json:"tags_file"`
 	ImagesFile       string        `json:"images_file"`
 	LogFile          string        `json:"log_file"`
+	TmpDir           string        `json:"tmp_dir"`
 	CrawlerConfig    CrawlerConfig `json:"crawler_config"`
 	MongoConfig      MongoConfig   `json:"mongo_config"`
 	Neo4jConfig      Neo4jConfig   `json:"neo4j_config"`
