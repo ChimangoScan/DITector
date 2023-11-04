@@ -1,8 +1,12 @@
 package myutils
 
 import (
+	"archive/tar"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
+	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -69,4 +73,60 @@ func DivideImageName(name string) (registry, namespace, repository, tag string) 
 	}
 
 	return
+}
+
+// ExtractTar extracts tar file to specific dst dir,
+// creating recursively when dir not exists.
+func ExtractTar(src, dst string) error {
+	// 打开tar文件
+	tarFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer tarFile.Close()
+
+	// 创建目标文件夹
+	if err = os.MkdirAll(dst, 0750); err != nil {
+		return err
+	}
+
+	// 创建Tar读取器
+	tr := tar.NewReader(tarFile)
+
+	// 逐个解压文件
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break // 所有文件已解压
+		}
+		if err != nil {
+			return err
+		}
+
+		// 创建目标文件
+		targetFile := path.Join(dst, header.Name)
+		info := header.FileInfo()
+
+		// 如果是文件夹，创建目录
+		if info.IsDir() {
+			if err = os.MkdirAll(targetFile, info.Mode()); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// 如果是文件，创建文件并写入数据
+		file, err := os.OpenFile(targetFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = io.Copy(file, tr)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

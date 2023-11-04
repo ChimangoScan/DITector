@@ -2,7 +2,18 @@ package analyzer
 
 import (
 	"context"
+	"os"
 )
+
+// parseConfigurationFromFile TODO: loads image config from file <digest>.json (CurrentImage.manifest.Config).
+func (currI *CurrentImage) parseConfigurationFromFile() error {
+	manifestFile, err := os.ReadFile(currI.manifest.Config)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 
 // parseConfigurationFromDockerEnv tries to inspect image from local env, with results
 // stored to currI.Configuration, formatted like `docker image inspect`.

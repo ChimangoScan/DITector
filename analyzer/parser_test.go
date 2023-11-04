@@ -8,7 +8,7 @@ import (
 )
 
 func TestPullSaveExtractImage(t *testing.T) {
-	ci, err := NewCurrentImage("hello-world:latest")
+	ci, err := NewCurrentImage("mongo:latest")
 	if err != nil {
 		log.Fatalln("create new current image got error:", err)
 	}
@@ -18,9 +18,15 @@ func TestPullSaveExtractImage(t *testing.T) {
 	go ci.pullSaveExtractImage(myutils.GlobalConfig.TmpDir, finish)
 
 	f := <-finish
-	fmt.Println(f.tarFilepath)
-	fmt.Println(f.filepath)
+	fmt.Println(f.imgTarPath)
+	fmt.Println(f.imgDirPath)
 	fmt.Println(f.err)
+
+	fmt.Println(ci.manifest.Config)
+	fmt.Println(ci.manifest.RepoTags)
+	fmt.Println(ci.manifest.Layers)
+
+	fmt.Println(ci.layerLocalFilepathList)
 }
 
 func TestParse(t *testing.T) {

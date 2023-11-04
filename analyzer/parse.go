@@ -6,11 +6,24 @@ import (
 	"github.com/Musso12138/dockercrawler/myutils"
 )
 
+func (currI *CurrentImage) ParseFromFile() (err error) {
+	downloadCh := make(chan downloadFinish)
+
+	// 等待镜像下载完成
+	finish := <-downloadCh
+	if finish.err != nil {
+		return fmt.Errorf("pull, save and extract image %s error: %s", currI.name, finish.err)
+	}
+	currI.imgTarFile = finish.imgTarPath
+	currI.imgFilepath = finish.imgDirPath
+}
+
 // ParseFromDockerEnv TODO: 解析指定镜像的元数据、配置信息，下载镜像，定位镜像的各个层
 func (currI *CurrentImage) ParseFromDockerEnv() (err error) {
-	// 新开goroutine下载镜像
-	downloadChan := make(chan downloadFinish)
-	go currI.pullSaveExtractImage(myutils.GlobalConfig.TmpDir, downloadChan)
+	// `docker pull`下载镜像
+	if err = currI.pullImage(); err != nil {
+		return err
+	}
 
 	// 获取当前Docker server环境所在的平台信息
 	if err = currI.parseServerPlatform(); err != nil {
@@ -20,12 +33,6 @@ func (currI *CurrentImage) ParseFromDockerEnv() (err error) {
 	// 获取元数据
 	if err = currI.parseMetadata(false); err != nil {
 		return err
-	}
-
-	// 等待镜像下载完成
-	finish := <-downloadChan
-	if finish.err != nil {
-		return fmt.Errorf("pull, save and extract image %s error: %s", currI.name, finish.err)
 	}
 
 	// 解析配置信息
