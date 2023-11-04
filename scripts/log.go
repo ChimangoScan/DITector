@@ -1,7 +1,7 @@
 package scripts
 
 import (
-	"myutils"
+	"github.com/Musso12138/dockercrawler/myutils"
 	"os"
 	"strings"
 )

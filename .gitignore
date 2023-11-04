@@ -3,7 +3,6 @@
 go.work
 go.work.sum
 crawler/proxyaddr.json
-*/go.sum
 secret.json
 .secret
 

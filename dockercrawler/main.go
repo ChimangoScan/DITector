@@ -1,13 +1,13 @@
 package main
 
 import (
-	"buildgraph"
-	"crawler"
 	"flag"
-	"myutils"
+	"github.com/Musso12138/dockercrawler/buildgraph"
+	"github.com/Musso12138/dockercrawler/crawler"
+	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/dockercrawler/scripts"
+	"github.com/Musso12138/dockercrawler/server"
 	"os"
-	"scripts"
-	"server"
 )
 
 func main() {

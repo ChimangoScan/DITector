@@ -2,8 +2,8 @@ package analyzer
 
 import (
 	"fmt"
+	"github.com/Musso12138/dockercrawler/myutils"
 	"log"
-	"myutils"
 	"testing"
 )
 

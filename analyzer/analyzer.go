@@ -1,7 +1,7 @@
 package analyzer
 
 import (
-	"myutils"
+	"github.com/Musso12138/dockercrawler/myutils"
 	"strconv"
 )
 
@@ -63,7 +63,7 @@ func (analyzer *ImageAnalyzer) loadRules(secretFile, sensParamFile string) error
 func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) {
 	var err error
 
-	analyzer.CurrentImage, err = NewCurrentImage()
+	analyzer.CurrentImage, err = NewCurrentImage(name)
 	if err != nil {
 		myutils.Logger.Error("")
 		return

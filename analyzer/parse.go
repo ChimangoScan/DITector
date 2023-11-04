@@ -3,14 +3,11 @@ package analyzer
 import (
 	"context"
 	"fmt"
-	"myutils"
+	"github.com/Musso12138/dockercrawler/myutils"
 )
 
 // ParseFromDockerEnv TODO: 解析指定镜像的元数据、配置信息，下载镜像，定位镜像的各个层
 func (currI *CurrentImage) ParseFromDockerEnv() (err error) {
-	// 解析镜像基本信息
-	currI.parseName()
-
 	// 新开goroutine下载镜像
 	downloadChan := make(chan downloadFinish)
 	go currI.pullSaveExtractImage(myutils.GlobalConfig.TmpDir, downloadChan)

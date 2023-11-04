@@ -2,7 +2,7 @@ package analyzer
 
 import (
 	"fmt"
-	"myutils"
+	"github.com/Musso12138/dockercrawler/myutils"
 )
 
 var imageAnalyzer, imageAnalyzerE = NewImageAnalyzerGlobalConfig()

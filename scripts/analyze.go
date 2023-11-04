@@ -1,15 +1,15 @@
 package scripts
 
 import (
-	"analyzer"
 	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Musso12138/dockercrawler/analyzer"
+	"github.com/Musso12138/dockercrawler/myutils"
 	"go.mongodb.org/mongo-driver/bson"
 	"io"
 	"log"
-	"myutils"
 	"os"
 	"os/exec"
 	"path"

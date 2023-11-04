@@ -1,46 +1,30 @@
 package analyzer
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"github.com/docker/docker/api/types"
-	"io"
+	"github.com/Musso12138/dockercrawler/myutils"
 	"log"
 	"testing"
 )
 
-func TestImagePull(t *testing.T) {
-	ci, err := NewCurrentImage()
+func TestPullSaveExtractImage(t *testing.T) {
+	ci, err := NewCurrentImage("hello-world:latest")
 	if err != nil {
 		log.Fatalln("create new current image got error:", err)
 	}
 
-	irc, err := ci.dockerClient.ImagePull(context.TODO(), "alpine:3", types.ImagePullOptions{})
-	if err != nil {
-		log.Fatalln("pull image got error:", err)
-	}
-	defer irc.Close()
+	finish := make(chan downloadFinish)
 
-	b, _ := io.ReadAll(irc)
-	fmt.Println(string(b))
-}
+	go ci.pullSaveExtractImage(myutils.GlobalConfig.TmpDir, finish)
 
-func TestDefer(t *testing.T) {
-	var a = make(map[string]interface{})
-	var err error
-	defer func(err error) {
-		fmt.Println("defer got error:", err)
-	}(err)
-
-	err = json.Unmarshal([]byte(`{"aaa": ["abc"}`), &a)
-	fmt.Println("got err:", err)
-
-	return
+	f := <-finish
+	fmt.Println(f.tarFilepath)
+	fmt.Println(f.filepath)
+	fmt.Println(f.err)
 }
 
 func TestParse(t *testing.T) {
-	ci, err := NewCurrentImage()
+	ci, err := NewCurrentImage("hello-world:latest")
 	if err != nil {
 		log.Fatalln("create new current image got error:", err)
 	}
@@ -60,7 +44,7 @@ func TestParse(t *testing.T) {
 }
 
 func TestParseMetadata(t *testing.T) {
-	ci, err := NewCurrentImage()
+	ci, err := NewCurrentImage("hello-world:latest")
 	if err != nil {
 		log.Fatalln("create new current image got error:", err)
 	}

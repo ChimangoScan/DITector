@@ -1,13 +1,14 @@
 package analyzer
 
 import (
+	"archive/tar"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Musso12138/dockercrawler/myutils"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"io"
-	"myutils"
 	"os"
 	"path"
 	"strings"
@@ -52,7 +53,7 @@ type layerInfo struct {
 	localFilePath string
 }
 
-func NewCurrentImage() (*CurrentImage, error) {
+func NewCurrentImage(imgName string) (*CurrentImage, error) {
 	currI := new(CurrentImage)
 	var err error
 
@@ -60,6 +61,9 @@ func NewCurrentImage() (*CurrentImage, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	currI.name = imgName
+	currI.parseName()
 
 	currI.metadata = new(metadata)
 	currI.layerWithContentList = make([]string, 0)
@@ -86,7 +90,7 @@ type downloadFinish struct {
 
 // pullSaveExtractImage pulls Docker image to local Docker env, saves it
 // to a tar archive, and extracts all tar archive(including image and each layer).
-func (currI *CurrentImage) pullSaveExtractImage(dir string, finish chan downloadFinish) {
+func (currI *CurrentImage) pullSaveExtractImage(targetDir string, finish chan downloadFinish) {
 	var tarFilepath string
 	var filepath string
 	var err error
@@ -104,8 +108,8 @@ func (currI *CurrentImage) pullSaveExtractImage(dir string, finish chan download
 	}
 
 	// 保存镜像
-	targetTarFilename := fmt.Sprintf("%s-%s-%s.tar.gz", currI.namespace, currI.repoName, currI.tagName)
-	tarFilepath = path.Join(myutils.GlobalConfig.TmpDir, targetTarFilename)
+	targetTarFilename := fmt.Sprintf("%s-%s-%s.tar", currI.namespace, currI.repoName, currI.tagName)
+	tarFilepath = path.Join(targetDir, targetTarFilename)
 	if err = currI.saveImage(tarFilepath); err != nil {
 		myutils.Logger.Error("save image", currI.name, "to filepath", tarFilepath, "failed with:", err.Error())
 		return
@@ -113,7 +117,7 @@ func (currI *CurrentImage) pullSaveExtractImage(dir string, finish chan download
 
 	// 解压镜像
 	targetDirname := fmt.Sprintf("%s-%s-%s", currI.namespace, currI.repoName, currI.tagName)
-	filepath = path.Join(myutils.GlobalConfig.TmpDir, targetDirname)
+	filepath = path.Join(targetDir, targetDirname)
 	if err = extractImage(tarFilepath, filepath); err != nil {
 		myutils.Logger.Error("extract image", currI.name, "from file", tarFilepath, "failed with:", err.Error())
 		return
@@ -178,7 +182,71 @@ func (currI *CurrentImage) saveImage(filepath string) error {
 	return nil
 }
 
-// extractImage TODO: extracts source image tar archive to dest dir.
-func extractImage(source, dest string) error {
+// extractImage extracts source image tar archive to dest dir,
+// including image tar and all layer tar.
+func extractImage(imgTar, dstDir string) error {
+	// 解压image tar
+	if err := extractTar(imgTar, dstDir); err != nil {
+		return err
+	}
+
+	// 逐个解压layer tar
+
+	return nil
+}
+
+// extractTar extracts tar file to specific dst dir,
+// creating recursively when dir not exists.
+func extractTar(src, dst string) error {
+	// 打开tar文件
+	tarFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer tarFile.Close()
+
+	// 创建目标文件夹
+	if err = os.MkdirAll(dst, 0750); err != nil {
+		return err
+	}
+
+	// 创建Tar读取器
+	tr := tar.NewReader(tarFile)
+
+	// 逐个解压文件
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break // 所有文件已解压
+		}
+		if err != nil {
+			return err
+		}
+
+		// 创建目标文件
+		targetFile := path.Join(dst, header.Name)
+		info := header.FileInfo()
+
+		// 如果是文件夹，创建目录
+		if info.IsDir() {
+			if err = os.MkdirAll(targetFile, info.Mode()); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// 如果是文件，创建文件并写入数据
+		file, err := os.OpenFile(targetFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = io.Copy(file, tr)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
