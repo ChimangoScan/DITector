@@ -65,7 +65,7 @@ type Issue struct {
 	Description   string  `json:"description"`
 	Severity      string  `json:"severity"`
 	SeverityScore float64 `json:"severity_score"`
-	LayerDigest   string  `json:"layer_digest"`
+	LayerDigest   string  `json:"layer_digest,omitempty"`
 }
 
 var IssueType = struct {

@@ -78,7 +78,7 @@ func (analyzer *ImageAnalyzer) AnalyzeImageMetadata(image *myutils.Image) ([]*my
 	return res, nil
 }
 
-func (analyzer *ImageAnalyzer) scanSecretsInString(s string) ([]*myutils.Issue, error) {
+func (analyzer *ImageAnalyzer) scanSecretsInString(s string) []*myutils.Issue {
 	res := make([]*myutils.Issue, 0)
 
 	for _, secret := range analyzer.rules.SecretRules {
@@ -99,10 +99,10 @@ func (analyzer *ImageAnalyzer) scanSecretsInString(s string) ([]*myutils.Issue, 
 		}
 	}
 
-	return res, nil
+	return res
 }
 
-func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) ([]*myutils.Issue, error) {
+func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) []*myutils.Issue {
 	res := make([]*myutils.Issue, 0)
 
 	for _, sensitive := range analyzer.rules.SensitiveParamRules {
@@ -120,5 +120,5 @@ func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) ([]*myutils.
 		}
 	}
 
-	return res, nil
+	return res
 }
