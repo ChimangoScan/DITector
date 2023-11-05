@@ -28,10 +28,12 @@ type CurrentImage struct {
 	digest       string
 
 	// metadata of the repository, the tag and the image
-	metadata *metadata
+	metadata       *metadata
+	recommendedCmd []string
 
 	// configuration of the image
 	configuration *Configuration
+	defaultCmd    defaultCmd
 
 	// content of the image
 	imgTarFile             string // filepath of image tar
@@ -46,6 +48,12 @@ type metadata struct {
 	repositoryMetadata *myutils.Repository
 	tagMetadata        *myutils.Tag
 	imageMetadata      *myutils.Image
+}
+
+type defaultCmd struct {
+	entrypoint string
+	cmd        string
+	fullCmd    string
 }
 
 type layerInfo struct {

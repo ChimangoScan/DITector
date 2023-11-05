@@ -6,9 +6,7 @@ import (
 )
 
 type ImageAnalyzer struct {
-	rules         *ImageAnalyzerRules
-	CurrentImage  *CurrentImage
-	CurrentResult *myutils.ImageResult
+	rules *ImageAnalyzerRules
 }
 
 // NewImageAnalyzerGlobalConfig creates a new ImageAnalyzer configured based on config.json
@@ -30,46 +28,18 @@ func NewImageAnalyzer(secretFile, sensParamFile string) (*ImageAnalyzer, error) 
 	// 初始化成员变量
 	analyzer.rules = newImageAnalyzerRules()
 
-	// 配置隐私泄露、敏感参数检测规则
-	err = analyzer.loadRules(secretFile, sensParamFile)
-	if err != nil {
+	// 配置隐私泄露规则
+	if err = analyzer.rules.loadSecretsFromYAMLFile(secretFile); err != nil {
+		return nil, err
+	}
+	analyzer.rules.compileSecretsRegex()
+
+	// 配置敏感参数规则
+	if err = analyzer.rules.loadSensitiveParamsFromYAMLFile(secretFile); err != nil {
 		return nil, err
 	}
 
 	return analyzer, nil
-}
-
-func (analyzer *ImageAnalyzer) loadRules(secretFile, sensParamFile string) error {
-	// 加载隐私泄露检测规则文件
-	if err := analyzer.rules.loadSecretsFromYAMLFile(secretFile); err != nil {
-		return err
-	}
-
-	// 编译用于隐私泄露检测的正则表达式
-	analyzer.rules.compileSecretsRegex()
-
-	// 加载敏感参数规则文件
-	if err := analyzer.rules.loadSensitiveParamsFromYAMLFile(sensParamFile); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// AnalyzeImageByName analyzes image totally by name, including analyzing metadata,
-// configuration, content of the image.
-//
-// Image needs to be stored in the local Docker environment.
-func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) {
-	var err error
-
-	analyzer.CurrentImage, err = NewCurrentImage(name)
-	if err != nil {
-		myutils.Logger.Error("")
-		return
-	}
-	// 解析镜像信息
-	analyzer.CurrentImage.ParseFromDockerEnv()
 }
 
 // AnalyzerImagePartialByName analyzes image partially by name, including only the metadata.
@@ -112,14 +82,39 @@ func (analyzer *ImageAnalyzer) scanSecretsInString(s string) ([]*myutils.Issue, 
 	res := make([]*myutils.Issue, 0)
 
 	for _, secret := range analyzer.rules.SecretRules {
+		if secret.CompiledRegex == nil {
+			continue
+		}
 		matches := secret.CompiledRegex.FindAllString(s, -1)
 		for _, match := range matches {
 			tmp := &myutils.Issue{
 				Type:          myutils.IssueType.SecretLeakage,
-				Rule:          secret,
+				RuleName:      secret.Name,
 				Match:         match,
+				Description:   secret.Description,
 				Severity:      secret.Severity,
 				SeverityScore: secret.SeverityScore,
+			}
+			res = append(res, tmp)
+		}
+	}
+
+	return res, nil
+}
+
+func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) ([]*myutils.Issue, error) {
+	res := make([]*myutils.Issue, 0)
+
+	for _, sensitive := range analyzer.rules.SensitiveParamRules {
+		matches := sensitive.CompiledRegex.FindAllString(s, -1)
+		for _, match := range matches {
+			tmp := &myutils.Issue{
+				Type:          myutils.IssueType.SensitiveParam,
+				RuleName:      sensitive.Name,
+				Match:         match,
+				Description:   sensitive.Description,
+				Severity:      sensitive.Severity,
+				SeverityScore: sensitive.SeverityScore,
 			}
 			res = append(res, tmp)
 		}

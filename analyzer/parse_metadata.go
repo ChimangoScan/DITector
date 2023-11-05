@@ -3,6 +3,11 @@ package analyzer
 import (
 	"fmt"
 	"github.com/Musso12138/dockercrawler/myutils"
+	"regexp"
+)
+
+var (
+	extRecommendCmdRE, _ = regexp.Compile(`docker\s+run.*(?:\\[\n\r].+)*.`)
 )
 
 // parseMetadata loads metadata of repository
@@ -11,6 +16,9 @@ func (currI *CurrentImage) parseMetadata(partial bool) (err error) {
 		myutils.Logger.Error("parse repository metadata of image", currI.name, "failed with:", err.Error())
 		return err
 	}
+
+	// 提取推荐容器启动命令
+	currI.recommendedCmd = extractRecommendCmd(currI.metadata.repositoryMetadata.FullDescription)
 
 	if currI.metadata.tagMetadata, err = currI.getTagMetadata(); err != nil {
 		myutils.Logger.Error("parse tag metadata of image", currI.name, "failed with:", err.Error())
@@ -170,4 +178,10 @@ func (currI *CurrentImage) getImageMetadata() (iMeta *myutils.Image, err error) 
 	}
 
 	return
+}
+
+// extractRecommendCmd extracts container start command recommended
+// by the author like `docker run` from full_description in repo metadata.
+func extractRecommendCmd(desc string) []string {
+	return extRecommendCmdRE.FindAllString(desc, -1)
 }

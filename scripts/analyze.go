@@ -51,7 +51,7 @@ func ScanAllSecretsInImageMetadata() {
 
 		imgres := new(myutils.ImageResult)
 		imgres.Digest = targetImage.Digest
-		imgres.LastAnalyzedTime = myutils.GetLocalNowTime()
+		imgres.LastAnalyzed = myutils.GetLocalNowTime()
 
 		imgres.Results, err = imageAnalyzer.AnalyzeImageMetadata(targetImage)
 		if err != nil {

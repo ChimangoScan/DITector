@@ -29,43 +29,20 @@ func TestPullSaveExtractImage(t *testing.T) {
 	fmt.Println(ci.layerLocalFilepathList)
 }
 
-func TestParse(t *testing.T) {
-	ci, err := NewCurrentImage("hello-world:latest")
+func TestParseFromFile(t *testing.T) {
+	ci, err := NewCurrentImage("curlimages/curl:8.4.0")
 	if err != nil {
 		log.Fatalln("create new current image got error:", err)
 	}
-	ci.ParseFromDockerEnv()
+	if err = ci.ParseFromFile(); err != nil {
+		log.Fatalln(err)
+	}
 
-	// 查看系统平台
-	fmt.Println(ci.architecture, ci.os)
-
-	// 查看元数据信息
-	fmt.Println(ci.metadata.repositoryMetadata)
-
-	// 查看配置信息
-	fmt.Println(ci.configuration.RepoTags, ci.configuration.Architecture, ci.configuration.Variant)
-
-	// 查看内容信息
-	fmt.Println(ci.layerInfoMap[ci.layerWithContentList[0]])
+	return
 }
 
-func TestParseMetadata(t *testing.T) {
-	ci, err := NewCurrentImage("hello-world:latest")
-	if err != nil {
-		log.Fatalln("create new current image got error:", err)
+func TestExtractRecommendCmd(t *testing.T) {
+	for _, s := range extractRecommendCmd("```\n> docker pull curlimages/curl:8.4.0\n```\n\n### run docker image\nCheck everything works properly by running:\n```\n> docker run --rm curlimages/curl:8.4.0 --version\n```\nHere is a more specific example of running curl docker container: \n```\n> docker run --rm curlimages/curl:8.4.0 -L -v https://curl.haxx.se \n```\nTo work with files it is best to mount directory:\n```\n>  docker run --rm -it \\\n-v \"$PWD:/work\" \\\ncurlimages/curl:8.4.0 \\\n-d@/work/test.txt https://httpbin.org/post\n```") {
+		fmt.Println(s)
 	}
-	ci.parseName()
-	ci.parseServerPlatform()
-
-	if err := ci.parseMetadata(true); err != nil {
-		log.Fatalln("parse metadata failed with:", err)
-	}
-
-	fmt.Println(ci.architecture, ci.os)
-
-	fmt.Println(ci.metadata.repositoryMetadata.Namespace, ci.metadata.repositoryMetadata.Name)
-
-	fmt.Println(ci.metadata.tagMetadata.Name, ci.metadata.tagMetadata.LastUpdated)
-
-	fmt.Println(ci.metadata.imageMetadata.Digest)
 }

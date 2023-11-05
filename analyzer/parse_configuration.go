@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/docker/docker/api/types/container"
 	"os"
+	"path"
 	"time"
 )
 
@@ -26,7 +27,7 @@ type RootFS struct {
 
 // parseConfigurationFromFile TODO: loads image config from file <digest>.json (CurrentImage.manifest.Config).
 func (currI *CurrentImage) parseConfigurationFromFile() error {
-	manifestData, err := os.ReadFile(currI.manifest.Config)
+	manifestData, err := os.ReadFile(path.Join(currI.imgFilepath, currI.manifest.Config))
 	if err != nil {
 		return err
 	}

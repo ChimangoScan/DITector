@@ -13,6 +13,7 @@ type ImageAnalyzerRules struct {
 
 type SecretRule struct {
 	Name          string         `yaml:"name" json:"name"`
+	Description   string         `yaml:"description" json:"description"`
 	Regex         string         `yaml:"regex" json:"regex"`
 	RegexType     string         `yaml:"regex_type"`
 	CompiledRegex *regexp.Regexp `yaml:"-" json:"-"`
@@ -21,6 +22,13 @@ type SecretRule struct {
 }
 
 type SensitiveParamRule struct {
+	Name          string         `yaml:"name" json:"name"`
+	Description   string         `yaml:"description"`
+	Regex         string         `yaml:"regex" json:"regex"`
+	RegexType     string         `yaml:"regex_type"`
+	CompiledRegex *regexp.Regexp `yaml:"-" json:"-"`
+	Severity      string         `yaml:"severity"`
+	SeverityScore float64        `yaml:"severity_score"`
 }
 
 func newImageAnalyzerRules() *ImageAnalyzerRules {
@@ -60,4 +68,10 @@ func (rs *ImageAnalyzerRules) loadSensitiveParamsFromYAMLFile(path string) error
 	}
 
 	return nil
+}
+
+func (rs *ImageAnalyzerRules) compileSensitiveParamRegex() {
+	for _, sensitive := range rs.SensitiveParamRules {
+		sensitive.CompiledRegex, _ = regexp.Compile(sensitive.Regex)
+	}
 }
