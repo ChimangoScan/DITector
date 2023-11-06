@@ -98,9 +98,12 @@ var IssuePart = struct {
 
 func AddIssue(dest []*Issue, src ...*Issue) {
 	for _, i := range src {
-		for _, j := range dest {
-			if *i == *j {
-				break
+		// 隐私泄露不存在覆盖
+		if i.Type != IssueType.SecretLeakage {
+			for _, j := range dest {
+				if *i == *j {
+					break
+				}
 			}
 		}
 		dest = append(dest, i)

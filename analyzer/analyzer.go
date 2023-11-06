@@ -63,10 +63,8 @@ func (analyzer *ImageAnalyzer) AnalyzeImageMetadata(image *myutils.Image) ([]*my
 		if layer.Size != 0 {
 			digest = layer.Digest
 		}
-		results, err := analyzer.scanSecretsInString(layer.Instruction)
-		if err != nil {
-			continue
-		}
+		results := analyzer.scanSecretsInString(layer.Instruction)
+
 		for _, result := range results {
 			result.Type = "in-dockerfile-command"
 			result.Path = "layer[" + strconv.Itoa(index) + "].instruction"
@@ -91,6 +89,30 @@ func (analyzer *ImageAnalyzer) scanSecretsInString(s string) []*myutils.Issue {
 				Type:          myutils.IssueType.SecretLeakage,
 				RuleName:      secret.Name,
 				Match:         match,
+				Description:   secret.Description,
+				Severity:      secret.Severity,
+				SeverityScore: secret.SeverityScore,
+			}
+			res = append(res, tmp)
+		}
+	}
+
+	return res
+}
+
+func (analyzer *ImageAnalyzer) scanSecretsInBytes(b []byte) []*myutils.Issue {
+	res := make([]*myutils.Issue, 0)
+
+	for _, secret := range analyzer.rules.SecretRules {
+		if secret.CompiledRegex == nil {
+			continue
+		}
+		matches := secret.CompiledRegex.FindAll(b, -1)
+		for _, match := range matches {
+			tmp := &myutils.Issue{
+				Type:          myutils.IssueType.SecretLeakage,
+				RuleName:      secret.Name,
+				Match:         string(match),
 				Description:   secret.Description,
 				Severity:      secret.Severity,
 				SeverityScore: secret.SeverityScore,

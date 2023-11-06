@@ -42,6 +42,7 @@ type CurrentImage struct {
 	layerWithContentList   []string
 	layerLocalFilepathList []string
 	layerInfoMap           map[string]*layerInfo
+	defaultExecFile        []string // filepath of default executed files
 }
 
 type metadata struct {

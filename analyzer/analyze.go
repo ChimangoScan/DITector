@@ -47,9 +47,34 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 		return nil, err
 	}
 
-	// 分析镜像各部分内容
+	// 创建扫描结果对象
 	ir := CurrentImageToImageResult(ci)
 	ir.LastAnalyzed = beginTimeStr
+
+	// 分析镜像
+	// 分析镜像元数据
+	metaIs, err := analyzer.analyzeMetadata(ci)
+	if err != nil {
+		return nil, err
+	}
+	ir.MetadataAnalyzed = true
+	ir.MetadataIssues = metaIs
+
+	// 分析镜像配置信息
+	configIs, err := analyzer.analyzeConfiguration(ci)
+	if err != nil {
+		return nil, err
+	}
+	ir.ConfigurationAnalyzed = true
+	ir.ConfigurationIssues = configIs
+
+	// 分析镜像内容信息
+	contentIs, err := analyzer.analyzeContent(ci, ir)
+	if err != nil {
+		return nil, err
+	}
+	ir.ContentAnalyzed = true
+	ir.ContentIssues = contentIs
 
 	// 收尾赋值工作
 	totalTime := time.Since(beginTime).String()

@@ -12,6 +12,22 @@ type MyNeo4j struct {
 	Driver neo4j.DriverWithContext
 }
 
+type LayerNotScannedError struct {
+	Msg string
+}
+
+func (e *LayerNotScannedError) Error() string {
+	return fmt.Sprintf("LayerNotScannedError: %s", e.Msg)
+}
+
+type LayerNotExistsError struct {
+	Msg string
+}
+
+func (e *LayerNotExistsError) Error() string {
+	return fmt.Sprintf("LayerNotExistsError: %s", e.Msg)
+}
+
 // NewNeo4jDriver 返回一个配置完全的neo4j driver
 func NewNeo4jDriver(target, username, password string, initFlag bool) (*MyNeo4j, error) {
 	var ret = new(MyNeo4j)
@@ -32,13 +48,13 @@ func NewNeo4jDriver(target, username, password string, initFlag bool) (*MyNeo4j,
 		session.ExecuteWrite(context.TODO(), func(tx neo4j.ManagedTransaction) (any, error) {
 			// 创建索引：基于节点id
 			tx.Run(context.TODO(),
-				"CREATE INDEX layer_id_index IF NOT EXISTS FOR (l:LayerSource) ON (l.id)",
+				"CREATE INDEX layer_id_index IF NOT EXISTS FOR (l:Layer) ON (l.id)",
 				map[string]any{},
 			)
 
 			// 创建索引：基于节点layer-id
 			tx.Run(context.TODO(),
-				"CREATE INDEX layer_digest_index IF NOT EXISTS FOR (l:LayerSource) ON (l.digest)",
+				"CREATE INDEX layer_digest_index IF NOT EXISTS FOR (l:Layer) ON (l.digest)",
 				map[string]any{},
 			)
 
@@ -77,7 +93,7 @@ func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(image *ImageSource) {
 
 		// 计算hash(1-2-5)，转成string类型
 		curLayer := image.Image.Layers[i]
-		layerID := curLayer.Digest[7:]
+		layerID := curLayer.Digest
 		accumulateLayerID += layerID
 		accumulateHash = CalStrSha256(accumulateLayerID)
 
@@ -106,7 +122,7 @@ func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(image *ImageSource) {
 // addNewLayerFunc 返回可用于session.ExecuteWrite的func，将Layer节点及节点间的边插入neo4j
 func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer LayerSource) neo4j.ManagedTransactionWork {
 	// 节点的两种label
-	// LayerSource:
+	// Layer:
 	// 		id: hash(1-2-5)
 	// 		digest: layer-ID
 	// 		images: [namespace1/repository1:tag1, ...]
@@ -123,7 +139,7 @@ func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Lay
 	if previousHash == "" {
 		return func(tx neo4j.ManagedTransaction) (any, error) {
 			var result, err = tx.Run(ctx,
-				"MERGE (l:LayerSource {id: $idHash}) "+
+				"MERGE (l:Layer {id: $idHash}) "+
 					"ON CREATE SET l.digest=$digest, l.images=$images "+
 					"WITH l "+
 					"MERGE (rl:RawLayer {digest: $digest}) "+
@@ -144,7 +160,7 @@ func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Lay
 		// 当前层非镜像第一层，需要插入层节点、边previous-->current
 		return func(tx neo4j.ManagedTransaction) (any, error) {
 			var result, err = tx.Run(ctx,
-				"MERGE (l:LayerSource {id: $idHash}) "+
+				"MERGE (l:Layer {id: $idHash}) "+
 					"ON CREATE SET l.digest=$digest, l.images=$images "+
 					"WITH l "+
 					"MERGE (rl:RawLayer {digest: $digest}) "+
@@ -152,7 +168,7 @@ func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Lay
 					"WITH l,rl "+
 					"MERGE (l)-[:SAME]-(rl) "+
 					"WITH l "+
-					"MATCH (previous:LayerSource {id: $previousHash}) "+
+					"MATCH (previous:Layer {id: $previousHash}) "+
 					"MERGE (previous)-[:IS_BASE_OF]->(l)",
 				map[string]any{"previousHash": previousHash, "idHash": idHash, "digest": layer.Digest, "images": []string{},
 					"size": layer.Size, "instruction": layer.Instruction, "scanned": false, "file_added": []string{}, "file_deleted": []string{}, "vul": [][]string{}},
@@ -172,7 +188,7 @@ func addImageToLayerFunc(ctx context.Context, imageName, idHash string) neo4j.Ma
 
 	return func(tx neo4j.ManagedTransaction) (any, error) {
 		var result, err = tx.Run(ctx,
-			"MATCH (l:LayerSource {id: $idHash}) "+
+			"MATCH (l:Layer {id: $idHash}) "+
 				"WHERE NOT $imageInfo IN l.images "+
 				"SET l.images=l.images+$imageInfo",
 			map[string]any{"idHash": idHash, "imageInfo": imageName},
@@ -183,6 +199,59 @@ func addImageToLayerFunc(ctx context.Context, imageName, idHash string) neo4j.Ma
 		}
 
 		return result.Consume(ctx)
+	}
+}
+
+// FindRawLayerByDigest TODO: 待测试
+func (neo4jDriver *MyNeo4j) FindRawLayerByDigest(digest string) (*LayerResult, error) {
+	ctx := context.Background()
+	session := neo4jDriver.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	layerNode, err := session.ExecuteRead(ctx, findRawLayerByDigestFunc(ctx, digest))
+	if err != nil {
+		return nil, err
+	}
+
+	prop := GetNodeProps(layerNode.(*neo4j.Record))
+	if scanned, ok := prop["scanned"]; ok {
+		if !scanned.(bool) {
+			return nil, &LayerNotScannedError{Msg: digest}
+		}
+
+		lr := &LayerResult{}
+		if analyzedFiles, ok := prop["analyzed_files"]; ok {
+			fmt.Println("RawLayer", digest, "analyzed_files:", analyzedFiles)
+			lr.AnalyzedFiles = analyzedFiles.([]string)
+		}
+		if fileIssues, ok := prop["file_issues"]; ok {
+			fmt.Println("RawLayer", digest, "file_issues:", fileIssues)
+			lr.FileIssues = fileIssues.(map[string][]*Issue)
+		}
+
+		return lr, nil
+	}
+
+	return nil, &LayerNotExistsError{Msg: digest}
+}
+
+// findRawLayerByDigestFunc 返回可用于session.ExecuteRead的func，find RawLayer Nodes according to digest
+func findRawLayerByDigestFunc(ctx context.Context, digest string) neo4j.ManagedTransactionWork {
+
+	return func(tx neo4j.ManagedTransaction) (any, error) {
+		var result, err = tx.Run(ctx,
+			"MATCH (l:RawLayer {id: $digest}) "+
+				"RETURN l",
+			map[string]any{"digest": digest},
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		record := result.Record()
+
+		return record, nil
 	}
 }
 
@@ -260,21 +329,21 @@ func (neo4jDriver *MyNeo4j) FindUpstreamLayerNodesByNodeId(nodeId string) (any, 
 
 	upNodes, err := session.ExecuteRead(ctx, findUpstreamNodesByNodeIdFunc(ctx, nodeId))
 	if err != nil {
-		Logger.Error("Neo4j find upstream LayerSource nodes by node id", nodeId, "failed with:", err.Error())
+		Logger.Error("Neo4j find upstream Layer nodes by node id", nodeId, "failed with:", err.Error())
 		return nil, err
 	}
 
 	return upNodes, nil
 }
 
-// findUpstreamNodesByNodeIdFunc 返回可用于session.ExecuteRead的func，find upstream LayerSource Nodes according to hash(1-2-5)
+// findUpstreamNodesByNodeIdFunc 返回可用于session.ExecuteRead的func，find upstream Layer Nodes according to hash(1-2-5)
 func findUpstreamNodesByNodeIdFunc(ctx context.Context, nodeId string) neo4j.ManagedTransactionWork {
 
 	return func(tx neo4j.ManagedTransaction) (any, error) {
 		var result, err = tx.Run(ctx,
-			"MATCH (l:LayerSource {id: $idHash}) "+
+			"MATCH (l:Layer {id: $idHash}) "+
 				"WITH l "+
-				"MATCH (up:LayerSource)-[:IS_BASE_OF*]->(l) "+
+				"MATCH (up:Layer)-[:IS_BASE_OF*]->(l) "+
 				"RETURN up",
 			map[string]any{"idHash": nodeId},
 		)
@@ -298,21 +367,21 @@ func (neo4jDriver *MyNeo4j) FindDownstreamLayerNodesByNodeId(nodeId string) (any
 
 	upNodes, err := session.ExecuteRead(ctx, findDownstreamNodesByNodeIdFunc(ctx, nodeId))
 	if err != nil {
-		Logger.Error("Neo4j find downstream LayerSource nodes by node id", nodeId, "failed with:", err.Error())
+		Logger.Error("Neo4j find downstream Layer nodes by node id", nodeId, "failed with:", err.Error())
 		return nil, err
 	}
 
 	return upNodes, nil
 }
 
-// findDownstreamNodesByNodeIdFunc 返回可用于session.ExecuteRead的func，find downstream LayerSource Nodes according to hash(1-2-5)
+// findDownstreamNodesByNodeIdFunc 返回可用于session.ExecuteRead的func，find downstream Layer Nodes according to hash(1-2-5)
 func findDownstreamNodesByNodeIdFunc(ctx context.Context, nodeId string) neo4j.ManagedTransactionWork {
 
 	return func(tx neo4j.ManagedTransaction) (any, error) {
 		var result, err = tx.Run(ctx,
-			"MATCH (l:LayerSource {id: $idHash}) "+
+			"MATCH (l:Layer {id: $idHash}) "+
 				"WITH l "+
-				"MATCH (l)-[:IS_BASE_OF*]->(down:LayerSource) "+
+				"MATCH (l)-[:IS_BASE_OF*]->(down:Layer) "+
 				"RETURN down",
 			map[string]any{"idHash": nodeId},
 		)
@@ -353,9 +422,14 @@ func CalculateImageNodeId(image *ImageOld) string {
 		if layer.Size == 0 {
 			continue
 		}
-		accumulateLayerID += layer.Digest[7:]
+		accumulateLayerID += layer.Digest
 	}
 	accumulateHash := CalStrSha256(accumulateLayerID)
 
 	return accumulateHash
+}
+
+func IsLayerNotScannedError(err error) bool {
+	_, is := err.(*LayerNotScannedError)
+	return is
 }
