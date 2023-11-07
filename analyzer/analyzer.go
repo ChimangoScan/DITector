@@ -87,7 +87,7 @@ func (analyzer *ImageAnalyzer) scanSecretsInString(s string) []*myutils.Issue {
 		for _, match := range matches {
 			tmp := &myutils.Issue{
 				Type:          myutils.IssueType.SecretLeakage,
-				RuleName:      secret.Name,
+				Name:          secret.Name,
 				Match:         match,
 				Description:   secret.Description,
 				Severity:      secret.Severity,
@@ -111,7 +111,7 @@ func (analyzer *ImageAnalyzer) scanSecretsInBytes(b []byte) []*myutils.Issue {
 		for _, match := range matches {
 			tmp := &myutils.Issue{
 				Type:          myutils.IssueType.SecretLeakage,
-				RuleName:      secret.Name,
+				Name:          secret.Name,
 				Match:         string(match),
 				Description:   secret.Description,
 				Severity:      secret.Severity,
@@ -132,7 +132,7 @@ func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) []*myutils.I
 		for _, match := range matches {
 			tmp := &myutils.Issue{
 				Type:          myutils.IssueType.SensitiveParam,
-				RuleName:      sensitive.Name,
+				Name:          sensitive.Name,
 				Match:         match,
 				Description:   sensitive.Description,
 				Severity:      sensitive.Severity,

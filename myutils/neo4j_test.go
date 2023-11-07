@@ -27,7 +27,7 @@ func TestFindUpstreamNodesByNodeId(t *testing.T) {
 		cnt++
 	}
 
-	accumulateHash := CalStrSha256(accumulateLayerID)
+	accumulateHash := Sha256Str(accumulateLayerID)
 	fmt.Println(accumulateHash)
 
 	neo4jDriver, err := NewNeo4jDriver("neo4j://localhost:7687", "neo4j", "qazwsxedc", false)

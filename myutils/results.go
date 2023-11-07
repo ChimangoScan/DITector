@@ -15,6 +15,7 @@ type ImageResult struct {
 
 	LastAnalyzed string `json:"last_analyzed"`
 	TotalTime    string `json:"total_time"`
+	AnalyzeTime  string `json:"analyze_time"`
 
 	MetadataAnalyzed bool     `json:"metadata_analyzed"`
 	MetadataIssues   []*Issue `json:"metadata_issues"`
@@ -27,9 +28,9 @@ type ImageResult struct {
 	Layers []string `json:"layers"`
 	// LayerResults: layer-id -> LayerResult
 	LayerResults map[string]*LayerResult `json:"layer_results"`
-	// fileIssues: filepath -> []*Issue, issues in the file system after mounting by UnionFS
-	fileIssues    map[string][]*Issue
-	ContentIssues []*Issue `json:"content_issues"`
+	// FileIssues: filepath -> []*Issue, issues in the file system after mounting by UnionFS
+	FileIssues    map[string][]*Issue `json:"-"`
+	ContentIssues []*Issue            `json:"content_issues"`
 }
 
 type LayerResult struct {
@@ -48,7 +49,7 @@ func NewImageResult() *ImageResult {
 	ir.ConfigurationIssues = make([]*Issue, 0)
 	ir.Layers = make([]string, 0)
 	ir.LayerResults = make(map[string]*LayerResult)
-	ir.fileIssues = make(map[string][]*Issue)
+	ir.FileIssues = make(map[string][]*Issue)
 	ir.ContentIssues = make([]*Issue, 0)
 
 	return ir
@@ -58,10 +59,12 @@ func NewImageResult() *ImageResult {
 // TODO: 需要考虑怎么统一所有检测的结果
 type Issue struct {
 	Type          string  `json:"type"`
+	Name          string  `json:"name"`
 	Part          string  `json:"part"` // part of image: metadata, configuration, content
 	Path          string  `json:"path"`
-	RuleName      string  `json:"rule_name"`
-	Match         string  `json:"match"`
+	Sha256        string  `json:"sha256,omitempty"`  // sha256 of file, only for malicious file
+	Version       string  `json:"version,omitempty"` // version of the product, only for vulnerability
+	Match         string  `json:"match,omitempty"`
 	Description   string  `json:"description"`
 	Severity      string  `json:"severity"`
 	SeverityScore float64 `json:"severity_score"`
@@ -69,17 +72,17 @@ type Issue struct {
 }
 
 var IssueType = struct {
-	SecretLeakage     string
-	SensitiveParam    string
-	Vulnerability     string
-	Misconfiguration  string
-	MaliciousSoftware string
+	SecretLeakage    string
+	SensitiveParam   string
+	Vulnerability    string
+	Misconfiguration string
+	MaliciousFile    string
 }{
 	"secret-leakage",
 	"sensitive-parameter",
 	"vulnerability",
 	"misconfiguration",
-	"malicious-software",
+	"malicious-file",
 }
 
 var IssuePart = struct {

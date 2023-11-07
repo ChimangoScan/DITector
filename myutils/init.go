@@ -97,7 +97,7 @@ func init() {
 	configTLSConfig()
 
 	// 初始化数据库连接
-	//connectDBs()
+	connectDBs()
 }
 
 // relativeToAbsoluteConfig 将GlobalConfig中相对路径的部分调整为绝对路径

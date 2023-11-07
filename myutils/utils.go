@@ -18,10 +18,25 @@ func GetLocalNowTime() string {
 	return time.Now().In(shanghai).Format(time.DateTime)
 }
 
-// CalStrSha256 对字符串计算sha256，并返回string
-func CalStrSha256(s string) string {
+// Sha256Str 对字符串计算sha256，并返回string
+func Sha256Str(s string) string {
 	tmpHash := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(tmpHash[:])
+}
+
+// Sha256File 计算文件sha256哈希值
+func Sha256File(filepath string) (string, error) {
+	f, err := os.Open(filepath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // StrLegalForRepository check whether string s is legal for repository search

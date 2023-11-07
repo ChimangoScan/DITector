@@ -100,7 +100,7 @@ func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(image *ImageSource) {
 		curLayer := image.Image.Layers[i]
 		layerID := curLayer.Digest
 		accumulateLayerID += layerID
-		accumulateHash = CalStrSha256(accumulateLayerID)
+		accumulateHash = Sha256Str(accumulateLayerID)
 
 		// 插入层及层间的边
 		_, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, previousHash, accumulateHash, curLayer))
@@ -207,38 +207,38 @@ func addImageToLayerFunc(ctx context.Context, imageName, idHash string) neo4j.Ma
 	}
 }
 
-// FindRawLayerByDigest TODO: 待测试
-func (neo4jDriver *MyNeo4j) FindRawLayerByDigest(digest string) (*LayerResult, error) {
-	ctx := context.Background()
-	session := neo4jDriver.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
-
-	layerNode, err := session.ExecuteRead(ctx, findRawLayerByDigestFunc(ctx, digest))
-	if err != nil {
-		return nil, err
-	}
-
-	prop := GetNodeProps(layerNode.(*neo4j.Record))
-	if scanned, ok := prop["scanned"]; ok {
-		if !scanned.(bool) {
-			return nil, &LayerNotScannedError{Msg: digest}
-		}
-
-		lr := &LayerResult{}
-		if analyzedFiles, ok := prop["analyzed_files"]; ok {
-			fmt.Println("RawLayer", digest, "analyzed_files:", analyzedFiles)
-			lr.AnalyzedFiles = analyzedFiles.([]string)
-		}
-		if fileIssues, ok := prop["file_issues"]; ok {
-			fmt.Println("RawLayer", digest, "file_issues:", fileIssues)
-			lr.FileIssues = fileIssues.(map[string][]*Issue)
-		}
-
-		return lr, nil
-	}
-
-	return nil, &LayerNotExistsError{Msg: digest}
-}
+//// FindRawLayerByDigest TODO: 待测试
+//func (neo4jDriver *MyNeo4j) FindRawLayerByDigest(digest string) (*LayerResult, error) {
+//	ctx := context.Background()
+//	session := neo4jDriver.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+//	defer session.Close(ctx)
+//
+//	layerNode, err := session.ExecuteRead(ctx, findRawLayerByDigestFunc(ctx, digest))
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	prop := GetNodeProps(layerNode.(*neo4j.Record))
+//	if scanned, ok := prop["scanned"]; ok {
+//		if !scanned.(bool) {
+//			return nil, &LayerNotScannedError{Msg: digest}
+//		}
+//
+//		lr := &LayerResult{}
+//		if analyzedFiles, ok := prop["analyzed_files"]; ok {
+//			fmt.Println("RawLayer", digest, "analyzed_files:", analyzedFiles)
+//			lr.AnalyzedFiles = analyzedFiles.([]string)
+//		}
+//		if fileIssues, ok := prop["file_issues"]; ok {
+//			fmt.Println("RawLayer", digest, "file_issues:", fileIssues)
+//			lr.FileIssues = fileIssues.(map[string][]*Issue)
+//		}
+//
+//		return lr, nil
+//	}
+//
+//	return nil, &LayerNotExistsError{Msg: digest}
+//}
 
 // findRawLayerByDigestFunc 返回可用于session.ExecuteRead的func，find RawLayer Nodes according to digest
 func findRawLayerByDigestFunc(ctx context.Context, digest string) neo4j.ManagedTransactionWork {
@@ -429,7 +429,7 @@ func CalculateImageNodeId(image *ImageOld) string {
 		}
 		accumulateLayerID += layer.Digest
 	}
-	accumulateHash := CalStrSha256(accumulateLayerID)
+	accumulateHash := Sha256Str(accumulateLayerID)
 
 	return accumulateHash
 }

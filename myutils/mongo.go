@@ -213,12 +213,9 @@ func (m *MyMongo) createTagCollIndexes() (err error) {
 func (m *MyMongo) createImgCollIndexes() (err error) {
 	indexView := m.ImgColl.Indexes()
 
-	// Unique index: namespace, repository_name, tag_name, digest
+	// Unique index: digest
 	model := mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "namespace", Value: 1},
-			{Key: "repository_name", Value: 1},
-			{Key: "tag_name", Value: 1},
 			{Key: "digest", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
@@ -239,16 +236,61 @@ func (m *MyMongo) createImgCollIndexes() (err error) {
 // createImgResultCollIndexes creates indexes on image results collection.
 // TODO: 具体使用哪些索引有待商榷
 func (m *MyMongo) createImgResultCollIndexes() (err error) {
-	resultsIndexView := m.ImgResultColl.Indexes()
+	indexView := m.ImgResultColl.Indexes()
+
+	// Unique index: namespace, repository_name, tag_name, digest
+	model := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "namespace", Value: 1},
+			{Key: "repository_name", Value: 1},
+			{Key: "tag_name", Value: 1},
+			{Key: "digest", Value: 1},
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	_, err = indexView.CreateOne(context.Background(), model)
+	if err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return
+		}
+	}
 
 	// index: digest
-	resultsModel := mongo.IndexModel{
+	model2 := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "digest", Value: 1},
 		},
 		Options: options.Index().SetUnique(false),
 	}
-	_, err = resultsIndexView.CreateOne(context.Background(), resultsModel)
+	_, err = indexView.CreateOne(context.Background(), model2)
+	if err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return
+		}
+	}
+
+	// index: namespace
+	model3 := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "namespace", Value: 1},
+		},
+		Options: options.Index().SetUnique(false),
+	}
+	_, err = indexView.CreateOne(context.Background(), model3)
+	if err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return
+		}
+	}
+
+	// index: digest
+	model4 := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "repository_name", Value: 1},
+		},
+		Options: options.Index().SetUnique(false),
+	}
+	_, err = indexView.CreateOne(context.Background(), model4)
 	if err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
 			return
@@ -263,16 +305,16 @@ func (m *MyMongo) createImgResultCollIndexes() (err error) {
 
 // createLayerResultCollIndexes creates indexes on layer results collection.
 func (m *MyMongo) createLayerResultCollIndexes() (err error) {
-	resultsIndexView := m.LayerResultColl.Indexes()
+	indexView := m.LayerResultColl.Indexes()
 
 	// index: digest
-	resultsModel := mongo.IndexModel{
+	model := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "digest", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
 	}
-	_, err = resultsIndexView.CreateOne(context.Background(), resultsModel)
+	_, err = indexView.CreateOne(context.Background(), model)
 	if err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
 			return
@@ -399,4 +441,57 @@ func (m *MyMongo) FindImageByDigest(digest string) (*Image, error) {
 	err := m.ImgColl.FindOne(context.Background(), filter).Decode(iMeta)
 
 	return iMeta, err
+}
+
+func (m *MyMongo) UpdateImgResult(imgRes *ImageResult) error {
+	filter := bson.M{
+		"namespace":       imgRes.Namespace,
+		"repository_name": imgRes.RepoName,
+		"tag_name":        imgRes.TagName,
+		"digest":          imgRes.Digest,
+	}
+	update := bson.M{
+		"$set": imgRes,
+	}
+	opts := options.Update().SetUpsert(true)
+
+	_, err := m.ImgResultColl.UpdateOne(context.TODO(), filter, update, opts)
+	return err
+}
+
+func (m *MyMongo) FindImgResultByDigest(digest string) (*ImageResult, error) {
+	res := new(ImageResult)
+
+	filter := bson.M{
+		"digest": digest,
+	}
+
+	err := m.ImgResultColl.FindOne(context.Background(), filter).Decode(res)
+
+	return res, err
+}
+
+func (m *MyMongo) UpdateLayerResult(layerRes *LayerResult) error {
+	filter := bson.M{
+		"digest": layerRes.Digest,
+	}
+	update := bson.M{
+		"$set": layerRes,
+	}
+	opts := options.Update().SetUpsert(true)
+
+	_, err := m.LayerResultColl.UpdateOne(context.TODO(), filter, update, opts)
+	return err
+}
+
+func (m *MyMongo) FindLayerResultByDigest(digest string) (*LayerResult, error) {
+	res := new(LayerResult)
+
+	filter := bson.M{
+		"digest": digest,
+	}
+
+	err := m.LayerResultColl.FindOne(context.Background(), filter).Decode(res)
+
+	return res, err
 }

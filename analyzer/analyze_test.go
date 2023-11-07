@@ -32,7 +32,18 @@ func TestScanSecretsInString(t *testing.T) {
 		log.Fatalln(imageAnalyzerE)
 	}
 
-	secrets, _ := imageAnalyzer.scanSecretsInString("-----BEGIN RSA PRIVATE KEYsk_test_000011112222333344445555")
+	secrets := imageAnalyzer.scanSecretsInString("-----BEGIN RSA PRIVATE KEYsk_test_000011112222333344445555")
+	for _, secret := range secrets {
+		fmt.Println(secret)
+	}
+}
+
+func TestScanSensitiveParamInString(t *testing.T) {
+	if imageAnalyzerE != nil {
+		log.Fatalln(imageAnalyzerE)
+	}
+
+	secrets := imageAnalyzer.scanSensitiveParamInString("")
 	for _, secret := range secrets {
 		fmt.Println(secret)
 	}

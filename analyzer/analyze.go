@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"github.com/Musso12138/dockercrawler/myutils"
+	"os"
 	"time"
 )
 
@@ -34,22 +35,51 @@ func AnalyzeImagePartialByName(name string) (*myutils.ImageResult, error) {
 //
 // Image needs to be stored in the local Docker environment.
 func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageResult, error) {
+	beginTime := time.Now()
+	beginTimeStr := myutils.GetLocalNowTime()
+
 	// 解析镜像信息
 	ci, err := NewCurrentImage(name)
 	if err != nil {
 		myutils.Logger.Error("create CurrentImage for image", name, "failed with:", err.Error())
 		return nil, err
 	}
-	beginTime := time.Now()
-	beginTimeStr := myutils.GetLocalNowTime()
 	if err = ci.ParseFromFile(); err != nil {
 		myutils.Logger.Error("parse image", name, "failed with:", err.Error())
 		return nil, err
 	}
+	// 结束时删除一切解压内容
+	defer func(dir string) {
+		e := os.RemoveAll(dir)
+		if e != nil {
+			myutils.Logger.Error("remove all from dir", dir, "failed with:", e.Error())
+		}
+	}(ci.imgFilepath)
 
-	// 创建扫描结果对象
-	ir := CurrentImageToImageResult(ci)
-	ir.LastAnalyzed = beginTimeStr
+	// 查找数据库中是否已有digest对应的镜像结果
+	analyzeBeginTime := time.Now()
+	if myutils.GlobalDBClient.MongoFlag {
+		res, err := myutils.GlobalDBClient.Mongo.FindImgResultByDigest(ci.digest)
+		if err == nil {
+			res.Name = name
+			res.Registry = ci.registry
+			res.Namespace = ci.namespace
+			res.RepoName = ci.repoName
+			res.TagName = ci.tagName
+			res.Architecture = ci.architecture
+			res.Variant = ci.variant
+			res.OS = ci.osVersion
+			res.OSVersion = ci.osVersion
+
+			res.TotalTime = time.Since(beginTime).String()
+			res.AnalyzeTime = time.Since(analyzeBeginTime).String()
+			return res, nil
+		}
+	}
+
+	// 数据库中没有结果，创建结果对象
+	res := CurrentImageToImageResult(ci)
+	res.LastAnalyzed = beginTimeStr
 
 	// 分析镜像
 	// 分析镜像元数据
@@ -57,30 +87,30 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 	if err != nil {
 		return nil, err
 	}
-	ir.MetadataAnalyzed = true
-	ir.MetadataIssues = metaIs
+	res.MetadataAnalyzed = true
+	res.MetadataIssues = metaIs
 
 	// 分析镜像配置信息
 	configIs, err := analyzer.analyzeConfiguration(ci)
 	if err != nil {
 		return nil, err
 	}
-	ir.ConfigurationAnalyzed = true
-	ir.ConfigurationIssues = configIs
+	res.ConfigurationAnalyzed = true
+	res.ConfigurationIssues = configIs
 
 	// 分析镜像内容信息
-	contentIs, err := analyzer.analyzeContent(ci, ir)
+	contentIs, err := analyzer.analyzeContent(ci, res)
 	if err != nil {
 		return nil, err
 	}
-	ir.ContentAnalyzed = true
-	ir.ContentIssues = contentIs
+	res.ContentAnalyzed = true
+	res.ContentIssues = contentIs
 
 	// 收尾赋值工作
-	totalTime := time.Since(beginTime).String()
-	ir.TotalTime = totalTime
+	res.TotalTime = time.Since(beginTime).String()
+	res.AnalyzeTime = time.Since(analyzeBeginTime).String()
 
-	return ir, nil
+	return res, nil
 }
 
 func CurrentImageToImageResult(ci *CurrentImage) *myutils.ImageResult {
@@ -97,7 +127,8 @@ func CurrentImageToImageResult(ci *CurrentImage) *myutils.ImageResult {
 	ir.OS = ci.os
 	ir.OSVersion = ci.osVersion
 
-	ir.Layers = ci.layerWithContentList
+	ir.Layers = make([]string, len(ci.layerWithContentList))
+	copy(ir.Layers, ci.layerWithContentList)
 	for _, digest := range ci.layerWithContentList {
 		ir.LayerResults[digest] = &myutils.LayerResult{
 			Instruction: ci.layerInfoMap[digest].instruction,
