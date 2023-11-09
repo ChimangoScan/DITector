@@ -34,19 +34,21 @@ type ImageResult struct {
 }
 
 type MetadataResult struct {
-	SecretLeakages  []SecretLeakage  `json:"secret_leakages"`
-	SensitiveParams []SensitiveParam `json:"sensitive_params"`
+	SecretLeakages  []*SecretLeakage  `json:"secret_leakages"`
+	SensitiveParams []*SensitiveParam `json:"sensitive_params"`
 }
 
 type ConfigurationResult struct {
-	SecretLeakages []SecretLeakage `json:"secret_leakages"`
+	SecretLeakages []*SecretLeakage `json:"secret_leakages"`
 }
 
 type ContentResult struct {
-	SecretLeakages    []SecretLeakage    `json:"secret_leakages"`
-	Vulnerabilities   []Vulnerability    `json:"vulnerabilities"`
-	Misconfigurations []Misconfiguration `json:"misconfiguration"`
-	MaliciousFiles    []MaliciousFile    `json:"malicious_files"`
+	Components []*Component `json:"components"`
+
+	SecretLeakages    []*SecretLeakage    `json:"secret_leakages"`
+	Vulnerabilities   []*Vulnerability    `json:"vulnerabilities"`
+	Misconfigurations []*Misconfiguration `json:"misconfiguration"`
+	MaliciousFiles    []*MaliciousFile    `json:"malicious_files"`
 }
 
 type LayerResult struct {
@@ -54,14 +56,14 @@ type LayerResult struct {
 	Size        int64  `json:"size"`
 	Digest      string `json:"digest"`
 
-	Total        int         `json:"total"` // from qianxin asky
-	ComponentNum int         `json:"component_num"`
-	Components   []Component `json:"components"`
+	Total        int          `json:"total"` // from qianxin asky
+	ComponentNum int          `json:"component_num"`
+	Components   []*Component `json:"components"`
 
-	SecretLeakages    []SecretLeakage    `json:"secret_leakages"`
-	Vulnerabilities   []Vulnerability    `json:"vulnerabilities"`
-	Misconfigurations []Misconfiguration `json:"misconfiguration"`
-	MaliciousFiles    []MaliciousFile    `json:"malicious_files"`
+	SecretLeakages    []*SecretLeakage    `json:"secret_leakages"`
+	Vulnerabilities   []*Vulnerability    `json:"vulnerabilities"`
+	Misconfigurations []*Misconfiguration `json:"misconfiguration"`
+	MaliciousFiles    []*MaliciousFile    `json:"malicious_files"`
 
 	// 奇安信扫描taskid
 	TaskID string `json:"task_id"`
@@ -93,8 +95,8 @@ func NewImageResult() *ImageResult {
 func NewMetadataResult() *MetadataResult {
 	res := new(MetadataResult)
 
-	res.SecretLeakages = make([]SecretLeakage, 0)
-	res.SensitiveParams = make([]SensitiveParam, 0)
+	res.SecretLeakages = make([]*SecretLeakage, 0)
+	res.SensitiveParams = make([]*SensitiveParam, 0)
 
 	return res
 }
@@ -102,7 +104,7 @@ func NewMetadataResult() *MetadataResult {
 func NewConfigurationResult() *ConfigurationResult {
 	res := new(ConfigurationResult)
 
-	res.SecretLeakages = make([]SecretLeakage, 0)
+	res.SecretLeakages = make([]*SecretLeakage, 0)
 
 	return res
 }
@@ -110,10 +112,12 @@ func NewConfigurationResult() *ConfigurationResult {
 func NewContentResult() *ContentResult {
 	res := new(ContentResult)
 
-	res.SecretLeakages = make([]SecretLeakage, 0)
-	res.Vulnerabilities = make([]Vulnerability, 0)
-	res.Misconfigurations = make([]Misconfiguration, 0)
-	res.MaliciousFiles = make([]MaliciousFile, 0)
+	res.Components = make([]*Component, 0)
+
+	res.SecretLeakages = make([]*SecretLeakage, 0)
+	res.Vulnerabilities = make([]*Vulnerability, 0)
+	res.Misconfigurations = make([]*Misconfiguration, 0)
+	res.MaliciousFiles = make([]*MaliciousFile, 0)
 
 	return res
 }
@@ -121,10 +125,12 @@ func NewContentResult() *ContentResult {
 func NewLayerResult() *LayerResult {
 	res := new(LayerResult)
 
-	res.SecretLeakages = make([]SecretLeakage, 0)
-	res.Vulnerabilities = make([]Vulnerability, 0)
-	res.Misconfigurations = make([]Misconfiguration, 0)
-	res.MaliciousFiles = make([]MaliciousFile, 0)
+	res.Components = make([]*Component, 0)
+
+	res.SecretLeakages = make([]*SecretLeakage, 0)
+	res.Vulnerabilities = make([]*Vulnerability, 0)
+	res.Misconfigurations = make([]*Misconfiguration, 0)
+	res.MaliciousFiles = make([]*MaliciousFile, 0)
 
 	return res
 }
@@ -147,6 +153,7 @@ type SensitiveParam struct {
 	Part          string  `json:"part"` // part of image: metadata, configuration, content
 	Path          string  `json:"path"`
 	Match         string  `json:"match"`
+	SensitiveType string  `json:"sensitive_type"`
 	Description   string  `json:"description"`
 	Severity      string  `json:"severity"`
 	SeverityScore float64 `json:"severity_score"`

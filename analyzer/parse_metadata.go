@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	extRecommendCmdRE, _ = regexp.Compile(`docker\s+run.*(?:\\[\n\r].+)*.`)
+	extRecommendCmdRE = regexp.MustCompile(`docker\s+run.*(?:\\[\n\r].+)*.`)
 )
 
 // parseMetadata loads metadata of repository

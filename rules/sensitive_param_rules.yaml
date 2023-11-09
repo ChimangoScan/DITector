@@ -1,1 +1,63 @@
-- name: 
+- name: "--mount"
+  sensitive_type: "violate the isolation of file systems"
+  description: "attach a filesystem mount to the container"
+  regex: "--mount(=|\s+)\S+"
+  severity: "MEDIUM"
+  severity_score: 4
+- name: "--volume"
+  sensitive_type: "violate the isolation of file systems"
+  description: "bind mount a volume to the container"
+  regex: "(-v|--volume)(=|\s+)\S+"
+  severity: "MEDIUM"
+  severity_score: 4
+
+- name: "--net"
+  sensitive_type: "violate the isolation of networking"
+  description: "connect container to a network"
+  regex: "--net(work)?(=|\s+)\S+"
+  severity: "MEDIUM"
+  severity_score: 4
+- name: "--publish"
+  sensitive_type: "violate the isolation of networking"
+  description: "publish a container's port(s) to the host"
+  regex: "(-p|--publish)(=|\s+)\S+"
+  severity: "LOW"
+  severity_score: 2
+- name: "--publish-all"
+  sensitive_type: "violate the isolation of networking"
+  description: "publish all exposed ports to random ports"
+  regex: "(-P|--publish-all)\s+"
+  severity: "LOW"
+  severity_score: 2
+
+- name: "--ipc"
+  sensitive_type: "break the separation of processes"
+  description: "set IPC mode for container"
+  regex: '--ipc(=|\s+)\S+'
+  severity: "HIGH"
+  severity_score: 7
+- name: "--pid"
+  sensitive_type: "break the separation of processes"
+  description: "set the PID namespace mode for the container"
+  regex: '--pid(=|\s+)\S+'
+  severity: "HIGH"
+  severity_score: 7
+
+- name: "--privileged"
+  sensitive_type: "escalate runtime privileges"
+  description: "give extended privileges to the container"
+  regex: "--privileged\s+"
+  severity: "CRITICAL"
+  severity_score: 10
+- name: "--cap-add"
+  sensitive_type: "escalate runtime privileges"
+  description: "add Linux capabilities to container"
+  regex: "--cap-add(=|\s+)\S+"
+  severity: "HIGH"
+  severity_score: 7
+- name: "--device"
+  sensitive_type: "escalate runtime privileges"
+  description: ""
+  regex: "--device(=|\s+)\S+"
+  severity: "MEDIUM"
+  severity_score: 5

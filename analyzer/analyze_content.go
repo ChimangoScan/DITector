@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"github.com/Musso12138/dockercrawler/analyzer/misconfiguration"
 	"github.com/Musso12138/dockercrawler/myutils"
 	"io"
 	"io/fs"
@@ -197,16 +198,16 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 		//TODO: component加入LayerResult
 
 		// 形成LayerResult的漏洞列表
-		vulnList := make([]myutils.Vulnerability, 0)
+		vulnList := make([]*myutils.Vulnerability, 0)
 		for _, vuln := range report.Data.ReportData.VulnInfo {
-			relPath, _ := filepath.Rel(layerDir, vuln.FilePath)
+			relPath := getRelAbsPath(layerDir, vuln.FilePath)
 			affectFile := make([]string, len(vuln.AffectFile))
 			for i, p := range vuln.AffectFile {
-				tmpRel, _ := filepath.Rel(layerDir, p)
+				tmpRel := getRelAbsPath(layerDir, p)
 				affectFile[i] = tmpRel
 			}
 
-			vulnList = append(vulnList, myutils.Vulnerability{
+			vulnList = append(vulnList, &myutils.Vulnerability{
 				Type:        myutils.IssueType.Vulnerability,
 				Name:        vuln.CVEID,
 				Part:        myutils.IssuePart.Content,
@@ -255,19 +256,37 @@ func scaVul(layerDir, dest string) (*AskYReport, error) {
 		return nil, err
 	}
 
-	scaFile, err := os.Open(dest)
-	if err != nil {
-		return nil, err
-	}
-	defer scaFile.Close()
-
-	// 上传asky sca结果到天蚕API
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy:           nil,
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
 		},
 	}
+
+	// 上传asky sca结果到天蚕API，建立检测任务
+	task, err := postCreateAskYTask(client, dest)
+	if err != nil {
+		myutils.Logger.Error("post SCA result file", dest, "to asky server failed with:", err.Error())
+		return nil, err
+	}
+
+	// 获取检测报告
+	report, err := checkGetAskYReport(client, task)
+	if err != nil {
+		myutils.Logger.Error("check and get asky report of task", task.Data.TaskID, "failed with:", err.Error())
+		return nil, err
+	}
+
+	return report, nil
+}
+
+// postCreateAskYTask 将指定SCA结果文件上传到asky服务端，返回检测任务信息
+func postCreateAskYTask(client *http.Client, dest string) (*AskYTask, error) {
+	scaFile, err := os.Open(dest)
+	if err != nil {
+		return nil, err
+	}
+	defer scaFile.Close()
 
 	postReq, err := http.NewRequest(http.MethodPost,
 		fmt.Sprintf("http://beta.tqs.qianxin-inc.cn/asky/skily/uploadLog?token=%s", myutils.GlobalConfig.AskyConfig.AskyToken),
@@ -296,6 +315,11 @@ func scaVul(layerDir, dest string) (*AskYReport, error) {
 		return nil, fmt.Errorf("asky start with task code %s", task.Code)
 	}
 
+	return task, nil
+}
+
+// checkGetAskYReport 查询服务端检测状态，检测完成后获取检测报告
+func checkGetAskYReport(client *http.Client, task *AskYTask) (*AskYReport, error) {
 	// 等待asky服务端检测任务完成
 	failCnt := 0
 	for {
@@ -336,7 +360,7 @@ func scaVul(layerDir, dest string) (*AskYReport, error) {
 		// 最多等待一个任务五分钟
 		failCnt++
 		if failCnt > 300 {
-			return nil, fmt.Errorf("waiting for asky server scanning filepath %s timeout after %d retries", dest, failCnt)
+			return nil, fmt.Errorf("waiting for asky server scanning filepath %s timeout after %d retries", task.Data.FileName, failCnt)
 		}
 	}
 
@@ -354,7 +378,7 @@ func scaVul(layerDir, dest string) (*AskYReport, error) {
 	}
 	defer reportResp.Body.Close()
 
-	body, err = io.ReadAll(reportResp.Body)
+	body, err := io.ReadAll(reportResp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -380,19 +404,45 @@ func scanLayerFunc(layer *layerInfo, fileWithIssues map[string]bool, defaultExec
 			return nil
 		}
 
-		relPath, err := filepath.Rel(layer.localFilePath, path)
-		if err != nil {
-			return err
-		}
+		relPath := getRelAbsPath(layer.localFilePath, path)
+
 		// 基于当前状态删除过往扫描记录
 		if secretFlag, ok := fileWithIssues[relPath]; ok && !secretFlag {
 			delete(fileWithIssues, relPath)
 		}
 
 		// TODO: 根据文件路径确定扫描内容
+		// txt文件，扫描隐私泄露
+
+		// 配置文件，检测错误配置
+		if need, apps := misconfiguration.FileNeedScan(relPath); need {
+
+		}
+
+		// 默认执行路径文件，检测恶意性
+		// Entry File，检测恶意性
+		if _, ok := defaultExecFiles[relPath]; ok {
+			malFile, malFlag, err := scanFileMalicious(path)
+			if err != nil {
+				return err
+			}
+			if malFlag {
+				malFile.Path = relPath
+				malFile.LayerDigest = layer.digest
+
+				layerResMu.Lock()
+				layerRes.MaliciousFiles = append(layerRes.MaliciousFiles, malFile)
+				layerResMu.Unlock()
+			}
+		}
 
 		return nil
 	}
+}
+
+func scanFileMisconfiguration(filepath string) ([]*myutils.Misconfiguration, error) {
+
+	return
 }
 
 // scanFileMalicious 利用奇安信云查接口检查文件是否恶意
@@ -438,7 +488,7 @@ func getFileReputation(filepath string) (*FileReputation, error) {
 		},
 	}
 
-	req, err := http.NewRequest("GET",
+	req, err := http.NewRequest(http.MethodGet,
 		fmt.Sprintf("http://tqs.qianxin-inc.cn/file/v1/files/%s/reputation", h),
 		nil,
 	)
@@ -461,4 +511,9 @@ func getFileReputation(filepath string) (*FileReputation, error) {
 	err = json.Unmarshal(body, res)
 
 	return res, err
+}
+
+func getRelAbsPath(layerDir, path string) string {
+	relPath, _ := filepath.Rel(layerDir, path)
+	return "/" + relPath
 }

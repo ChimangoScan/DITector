@@ -15,8 +15,8 @@ func (analyzer *ImageAnalyzer) analyzeConfiguration(ci *CurrentImage) (*myutils.
 	return res, nil
 }
 
-func (analyzer *ImageAnalyzer) analyzeEnvConfig(ci *CurrentImage) []myutils.SecretLeakage {
-	res := make([]myutils.SecretLeakage, 0)
+func (analyzer *ImageAnalyzer) analyzeEnvConfig(ci *CurrentImage) []*myutils.SecretLeakage {
+	res := make([]*myutils.SecretLeakage, 0)
 
 	// 分析隐私泄露
 	// 扫描镜像环境变量

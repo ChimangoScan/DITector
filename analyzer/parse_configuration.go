@@ -27,6 +27,11 @@ type RootFS struct {
 	DiffIDs []string `json:"diff_ids"`
 }
 
+var (
+	stripBinShR      = regexp.MustCompile(`^(?:/bin/sh\s+-c\s+)?(.*)`)
+	defaultExecFileR = regexp.MustCompile(`^(?:python\s+|./)?(\S+)`)
+)
+
 // parseConfigurationFromFile TODO: loads image config from file <digest>.json (CurrentImage.manifest.Config).
 func (currI *CurrentImage) parseConfigurationFromFile() error {
 	manifestData, err := os.ReadFile(path.Join(currI.imgFilepath, currI.manifest.Config))
@@ -51,8 +56,6 @@ func (currI *CurrentImage) parseConfigurationFromFile() error {
 		currI.defaultCmd.fullCmd = currI.defaultCmd.cmd
 	}
 	// 解析容器默认执行文件路径
-	stripBinShR, _ := regexp.Compile(`^(?:/bin/sh\s+-c\s+)?(.*)`)
-	defaultExecFileR, _ := regexp.Compile(`^(?:python\s+|./)?(\S+)`)
 	cmd := currI.defaultCmd.fullCmd
 	if strings.HasPrefix(cmd, "/bin/sh -c") {
 		ms := stripBinShR.FindStringSubmatch(cmd)

@@ -53,8 +53,8 @@ func (analyzer *ImageAnalyzer) AnalyzeMetadata() {
 
 }
 
-func (analyzer *ImageAnalyzer) scanSecretsInString(s string) []myutils.SecretLeakage {
-	res := make([]myutils.SecretLeakage, 0)
+func (analyzer *ImageAnalyzer) scanSecretsInString(s string) []*myutils.SecretLeakage {
+	res := make([]*myutils.SecretLeakage, 0)
 
 	for _, secret := range analyzer.rules.SecretRules {
 		if secret.CompiledRegex == nil {
@@ -62,7 +62,7 @@ func (analyzer *ImageAnalyzer) scanSecretsInString(s string) []myutils.SecretLea
 		}
 		matches := secret.CompiledRegex.FindAllString(s, -1)
 		for _, match := range matches {
-			tmp := myutils.SecretLeakage{
+			tmp := &myutils.SecretLeakage{
 				Type:          myutils.IssueType.SecretLeakage,
 				Name:          secret.Name,
 				Match:         match,
@@ -77,8 +77,8 @@ func (analyzer *ImageAnalyzer) scanSecretsInString(s string) []myutils.SecretLea
 	return res
 }
 
-func (analyzer *ImageAnalyzer) scanSecretsInBytes(b []byte) []myutils.SecretLeakage {
-	res := make([]myutils.SecretLeakage, 0)
+func (analyzer *ImageAnalyzer) scanSecretsInBytes(b []byte) []*myutils.SecretLeakage {
+	res := make([]*myutils.SecretLeakage, 0)
 
 	for _, secret := range analyzer.rules.SecretRules {
 		if secret.CompiledRegex == nil {
@@ -86,7 +86,7 @@ func (analyzer *ImageAnalyzer) scanSecretsInBytes(b []byte) []myutils.SecretLeak
 		}
 		matches := secret.CompiledRegex.FindAll(b, -1)
 		for _, match := range matches {
-			tmp := myutils.SecretLeakage{
+			tmp := &myutils.SecretLeakage{
 				Type:          myutils.IssueType.SecretLeakage,
 				Name:          secret.Name,
 				Match:         string(match),
@@ -101,16 +101,17 @@ func (analyzer *ImageAnalyzer) scanSecretsInBytes(b []byte) []myutils.SecretLeak
 	return res
 }
 
-func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) []myutils.SensitiveParam {
-	res := make([]myutils.SensitiveParam, 0)
+func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) []*myutils.SensitiveParam {
+	res := make([]*myutils.SensitiveParam, 0)
 
 	for _, sensitive := range analyzer.rules.SensitiveParamRules {
 		matches := sensitive.CompiledRegex.FindAllString(s, -1)
 		for _, match := range matches {
-			tmp := myutils.SensitiveParam{
+			tmp := &myutils.SensitiveParam{
 				Type:          myutils.IssueType.SensitiveParam,
 				Name:          sensitive.Name,
 				Match:         match,
+				SensitiveType: sensitive.SensitiveType,
 				Description:   sensitive.Description,
 				Severity:      sensitive.Severity,
 				SeverityScore: sensitive.SeverityScore,

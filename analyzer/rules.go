@@ -24,6 +24,7 @@ type SecretRule struct {
 
 type SensitiveParamRule struct {
 	Name          string         `yaml:"name" json:"name"`
+	SensitiveType string         `yaml:"sensitive_type"`
 	Description   string         `yaml:"description"`
 	Regex         string         `yaml:"regex" json:"regex"`
 	RegexType     string         `yaml:"regex_type"`
@@ -70,7 +71,7 @@ func (rs *ImageAnalyzerRules) loadSecretsFromYAMLFile(path string) error {
 
 func (rs *ImageAnalyzerRules) compileSecretsRegex() {
 	for _, secret := range rs.SecretRules {
-		secret.CompiledRegex, _ = regexp.Compile(secret.Regex)
+		secret.CompiledRegex = regexp.MustCompile(secret.Regex)
 	}
 }
 
@@ -89,7 +90,7 @@ func (rs *ImageAnalyzerRules) loadSensitiveParamsFromYAMLFile(path string) error
 
 func (rs *ImageAnalyzerRules) compileSensitiveParamRegex() {
 	for _, sensitive := range rs.SensitiveParamRules {
-		sensitive.CompiledRegex, _ = regexp.Compile(sensitive.Regex)
+		sensitive.CompiledRegex = regexp.MustCompile(sensitive.Regex)
 	}
 }
 
@@ -108,11 +109,11 @@ func (rs *ImageAnalyzerRules) loadMisConfigFromYAMLFile(path string) error {
 
 func (rs *ImageAnalyzerRules) compileMisConfigRegex() {
 	for _, misconf := range rs.MisConfigRules {
-		misconf.CompiledFileRegex, _ = regexp.Compile(misconf.FileRegex)
+		misconf.CompiledFileRegex = regexp.MustCompile(misconf.FileRegex)
 		for _, check := range misconf.CheckRegex {
-			checkR, _ := regexp.Compile(check)
+			checkR := regexp.MustCompile(check)
 			misconf.CompliedCheckRegex = append(misconf.CompliedCheckRegex, checkR)
 		}
-		misconf.CompiledRegex, _ = regexp.Compile(misconf.Regex)
+		misconf.CompiledRegex = regexp.MustCompile(misconf.Regex)
 	}
 }
