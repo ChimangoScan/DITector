@@ -3,8 +3,8 @@ package crawler
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Musso12138/dockercrawler/mymysql"
 	"log"
-	"mymysql"
 	"os"
 	"path"
 	"runtime"

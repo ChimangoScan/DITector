@@ -191,7 +191,7 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 	return res, nil
 }
 
-// analyzeLayer TODO: traverses and analyzes files under inputted layerDir,
+// analyzeLayer traverses and analyzes files under inputted layerDir,
 // and writes results directly to layerResult.
 func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map[string]bool, defaultExecFiles map[string]struct{}) (*myutils.LayerResult, bool, error) {
 	// 数据库在线，检查是否已被分析
@@ -222,7 +222,7 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 			return
 		}
 
-		//TODO: component加入LayerResult
+		// component加入LayerResult
 		componentList := make([]*myutils.Component, 0)
 		for _, comp := range report.Data.ReportData.Component {
 			relPath := getRelAbsPath(layerDir, comp.FilePath)
@@ -289,7 +289,7 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 	return res, false, err
 }
 
-// scaVul TODO: 对层文件进行SCA并进行漏洞匹配
+// scaVul 对层文件进行SCA并进行漏洞匹配
 func scaVul(layerDir, dest string) (*AskYReport, error) {
 	// 调用asky脚本本地SCA
 	cmd := exec.Command("bash", myutils.GlobalConfig.AskyConfig.AskyFile, "-s", layerDir, "-o", dest)

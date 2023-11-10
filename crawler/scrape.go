@@ -2,7 +2,7 @@ package crawler
 
 import (
 	"fmt"
-	"myutils"
+	"github.com/Musso12138/dockercrawler/myutils"
 	"strconv"
 	"strings"
 	"sync"

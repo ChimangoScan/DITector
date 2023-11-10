@@ -234,7 +234,6 @@ func (m *MyMongo) createImgCollIndexes() (err error) {
 }
 
 // createImgResultCollIndexes creates indexes on image results collection.
-// TODO: 具体使用哪些索引有待商榷
 func (m *MyMongo) createImgResultCollIndexes() (err error) {
 	indexView := m.ImgResultColl.Indexes()
 

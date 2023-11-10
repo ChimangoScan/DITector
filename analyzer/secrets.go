@@ -1,11 +1,40 @@
 package analyzer
 
 import (
+	"fmt"
 	"github.com/Musso12138/dockercrawler/myutils"
+	"io"
+	"net/http"
 	"os"
 )
 
 func FileNeedScanSecrets(filepath string) bool {
+	// 判断文件类型是否为text
+	file, err := os.Open(filepath)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	buffer := make([]byte, 512)
+	_, err = file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return false
+	}
+
+	mimeType := http.DetectContentType(buffer)
+	fmt.Println(mimeType)
+	isText := false
+	if len(mimeType) >= 5 && mimeType[:5] == "text/" {
+		isText = true
+	}
+
+	if !isText {
+		return false
+	}
+
+	// 根据文件路径判断是否需要检测
+
 	return false
 }
 
