@@ -7,7 +7,7 @@ import (
 )
 
 func TestScanSecretsInFilepath(t *testing.T) {
-	secrets, err := scanSecretsInFilepath("/Users/musso/workshop/docker-projects/test")
+	secrets, err := scanSecretsInFilepath("/data/tmp/secret-tests")
 	if err != nil {
 		log.Fatalln(err)
 	}
