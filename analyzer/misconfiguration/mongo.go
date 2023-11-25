@@ -2,7 +2,7 @@ package misconfiguration
 
 import (
 	"fmt"
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/myutils"
 	"gopkg.in/yaml.v3"
 	"os"
 	"regexp"

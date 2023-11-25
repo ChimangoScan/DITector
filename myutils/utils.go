@@ -18,6 +18,10 @@ func GetLocalNowTime() string {
 	return time.Now().In(shanghai).Format(time.DateTime)
 }
 
+func GetLocalNowTimeNoSpace() string {
+	return time.Now().In(shanghai).Format("20060102T150405")
+}
+
 // Sha256Str 对字符串计算sha256，并返回string
 func Sha256Str(s string) string {
 	tmpHash := sha256.Sum256([]byte(s))

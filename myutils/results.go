@@ -179,6 +179,7 @@ type SensitiveParam struct {
 	Part          string  `json:"part"` // part of image: metadata, configuration, content
 	Path          string  `json:"path"`
 	Match         string  `json:"match"`
+	RawCmd        string  `json:"raw_cmd"`
 	SensitiveType string  `json:"sensitive_type"`
 	Description   string  `json:"description"`
 	Severity      string  `json:"severity"`

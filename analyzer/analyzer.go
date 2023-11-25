@@ -1,7 +1,7 @@
 package analyzer
 
 import (
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/myutils"
 )
 
 type ImageAnalyzer struct {

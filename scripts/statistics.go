@@ -5,11 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Musso12138/docker-scan/myutils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"io"
 	"log"
-	"myutils"
 	"os"
 	"path"
 	"runtime"
@@ -124,7 +124,7 @@ func CalculateRepositoriesDependentWeights() {
 						}
 						accumulateLayerID += layer.Digest[7:]
 					}
-					accumulateHash := myutils.CalStrSha256(accumulateLayerID)
+					accumulateHash := myutils.Sha256Str(accumulateLayerID)
 
 					// calculate upstream and downstream images
 					upImages, err := myNeo4jDriver.FindUpstreamImagesByNodeId(accumulateHash)

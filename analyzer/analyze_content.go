@@ -5,8 +5,8 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/Musso12138/dockercrawler/analyzer/misconfiguration"
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/analyzer/misconfiguration"
+	"github.com/Musso12138/docker-scan/myutils"
 	"io"
 	"io/fs"
 	"mime/multipart"
@@ -110,10 +110,23 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 	for _, ld := range ci.layerWithContentList {
 		layerRes, fromMongo, err := analyzer.analyzeLayer(ci.layerInfoMap[ld], fileWithIssues, defaultExecFiles)
 		if err != nil {
-			myutils.Logger.Error("analyze layer", ci.layerInfoMap[ld].digest, "failed with:", err.Error())
-			return nil, err
+			myutils.Logger.Error("analyze layer", ci.layerInfoMap[ld].digest, "layer dir path", ci.layerInfoMap[ld].localFilePath, "failed with:", err.Error())
+			continue
 		}
 		ir.LayerResults[ld] = layerRes
+
+		// 新分析的结果存入数据库
+		if !fromMongo {
+			if myutils.GlobalDBClient.MongoFlag {
+				ci.wg.Add(1)
+				go func(layerRes *myutils.LayerResult) {
+					ci.wg.Done()
+					if e := myutils.GlobalDBClient.Mongo.UpdateLayerResult(layerRes); e != nil {
+						myutils.Logger.Error("update LayerResult", layerRes.Digest, "failed with:", e.Error())
+					}
+				}(layerRes)
+			}
+		}
 
 		// 把有问题的结果文件放入当前状态表
 		for _, secretInfo := range layerRes.SecretLeakages {
@@ -127,17 +140,6 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 		}
 		for _, malInfo := range layerRes.MaliciousFiles {
 			fileWithIssues[malInfo.Path] = false
-		}
-
-		// 新分析的结果存入数据库
-		if !fromMongo {
-			if myutils.GlobalDBClient.MongoFlag {
-				go func(layerRes *myutils.LayerResult) {
-					if e := myutils.GlobalDBClient.Mongo.UpdateLayerResult(layerRes); e != nil {
-						myutils.Logger.Error("update LayerResult", layerRes.Digest, "failed with:", e.Error())
-					}
-				}(layerRes)
-			}
 		}
 	}
 
@@ -304,7 +306,7 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 
 	// 遍历layer目录，发现需要扫描错误配置/恶意软件的文件，并进行相应扫描
 	if err = filepath.Walk(layer.localFilePath, analyzer.scanLayerFunc(layer, fileWithIssues, defaultExecFiles, res, &resLock)); err != nil {
-		fmt.Println()
+		myutils.Logger.Error("walk and scan layer dir", layer.localFilePath, "failed with:", err.Error())
 	}
 
 	wg.Wait()
@@ -598,6 +600,9 @@ func getFileReputation(filepath string) (*FileReputation, error) {
 }
 
 func getRelAbsPath(layerDir, path string) string {
-	relPath, _ := filepath.Rel(layerDir, path)
+	relPath, err := filepath.Rel(layerDir, path)
+	if err != nil {
+		return path
+	}
 	return "/" + relPath
 }

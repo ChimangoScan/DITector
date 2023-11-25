@@ -1,7 +1,7 @@
 package scripts
 
 import (
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/myutils"
 	"os"
 	"strings"
 )

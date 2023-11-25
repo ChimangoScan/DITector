@@ -2,7 +2,7 @@ package analyzer
 
 import (
 	"fmt"
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/myutils"
 	"os"
 	"time"
 )
@@ -141,8 +141,10 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 	}
 
 	// 下载并解析镜像信息
+	// ci.ParseFromFile中涉及WaitGroup Add，后续返回前需要Wait
 	if err = ci.ParseFromFile(); err != nil {
 		myutils.Logger.Error("parse image", name, "failed with:", err.Error())
+		ci.wg.Wait()
 		return nil, err
 	}
 	// 结束时删除一切解压内容
@@ -173,6 +175,15 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 
 				imgRes.TotalTime = time.Since(beginTime).String()
 				imgRes.AnalyzeTime = time.Since(analyzeBeginTime).String()
+
+				ci.wg.Add(1)
+				go func(imgRes *myutils.ImageResult) {
+					defer ci.wg.Done()
+					if e := myutils.GlobalDBClient.Mongo.UpdateImgResult(imgRes); e != nil {
+						myutils.Logger.Error("update ImageResult", imgRes.Name, imgRes.Digest, "failed with:", e.Error())
+					}
+				}(imgRes)
+				ci.wg.Wait()
 				return imgRes, nil
 			}
 		}
@@ -186,6 +197,7 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 	// 分析镜像元数据
 	metaIs, err := analyzer.analyzeMetadata(ci)
 	if err != nil {
+		ci.wg.Wait()
 		return nil, err
 	}
 	res.MetadataAnalyzed = true
@@ -194,6 +206,7 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 	// 分析镜像配置信息
 	configIs, err := analyzer.analyzeConfiguration(ci)
 	if err != nil {
+		ci.wg.Wait()
 		return nil, err
 	}
 	res.ConfigurationAnalyzed = true
@@ -202,6 +215,7 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 	// 分析镜像内容信息
 	contentIs, err := analyzer.analyzeContent(ci, res)
 	if err != nil {
+		ci.wg.Wait()
 		return nil, err
 	}
 	res.ContentAnalyzed = true
@@ -218,6 +232,8 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string) (*myutils.ImageRe
 			}
 		}(res)
 	}
+
+	ci.wg.Wait()
 
 	return res, nil
 }

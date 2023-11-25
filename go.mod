@@ -1,4 +1,4 @@
-module github.com/Musso12138/dockercrawler
+module github.com/Musso12138/docker-scan
 
 go 1.20
 

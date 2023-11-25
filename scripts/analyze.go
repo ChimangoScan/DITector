@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/Musso12138/dockercrawler/analyzer"
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/analyzer"
+	"github.com/Musso12138/docker-scan/myutils"
 	"go.mongodb.org/mongo-driver/bson"
 	"io"
 	"log"
@@ -23,14 +23,7 @@ import (
 // log to file
 // /data/docker-crawler/results/secrets-in-image-metadata.log
 func ScanAllSecretsInImageMetadata() {
-	mymongo, _ := myutils.ConfigMongoClient(false)
-	imageAnalyzer, err := analyzer.NewImageAnalyzerGlobalConfig()
-	if err != nil {
-		logself(myutils.LogLevelStr.Error, "load yaml rules failed with:", err.Error())
-		log.Fatalln(err)
-	}
-
-	cursor, err := mymongo.ImagesCollection.Find(context.TODO(), bson.D{})
+	cursor, err := myutils.GlobalDBClient.Mongo.ImgColl.Find(context.TODO(), bson.D{})
 	if err != nil {
 		logself(myutils.LogLevelStr.Error, "traverse images failed with:", err.Error())
 		log.Fatalln(err)
@@ -53,7 +46,7 @@ func ScanAllSecretsInImageMetadata() {
 		imgres.Digest = targetImage.Digest
 		imgres.LastAnalyzed = myutils.GetLocalNowTime()
 
-		imgres.Results, err = imageAnalyzer.AnalyzeImageMetadata(targetImage)
+		imgres, err = analyzer.AnalyzeImagePartialByName(targetImage)
 		if err != nil {
 			logself(myutils.LogLevelStr.Error, "analyze metadata of image", imgres.Digest, "failed with:", err.Error())
 			continue

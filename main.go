@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/Musso12138/dockercrawler/cmd"
+	"github.com/Musso12138/docker-scan/cmd"
 	"log"
 )
 

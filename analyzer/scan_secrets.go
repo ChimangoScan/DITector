@@ -3,7 +3,7 @@ package analyzer
 import (
 	"bufio"
 	"encoding/json"
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/myutils"
 	"os/exec"
 )
 

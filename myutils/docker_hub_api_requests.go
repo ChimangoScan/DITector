@@ -9,8 +9,8 @@ import (
 	"os"
 )
 
-// configHTTPProxy configures http and https proxy.
-func configHTTPProxy() {
+// configDefaultHTTPProxy configures http and https proxy.
+func configDefaultHTTPProxy() {
 	os.Setenv("http_proxy", "127.0.0.1:7890")
 	os.Setenv("https_proxy", "127.0.0.1:7890")
 }

@@ -3,7 +3,7 @@ package analyzer
 import (
 	"context"
 	"fmt"
-	"github.com/Musso12138/dockercrawler/myutils"
+	"github.com/Musso12138/docker-scan/myutils"
 )
 
 // ParsePartial 仅解析指定镜像的元数据

@@ -1,6 +1,6 @@
 package analyzer
 
-import "github.com/Musso12138/dockercrawler/myutils"
+import "github.com/Musso12138/docker-scan/myutils"
 
 func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) []*myutils.SensitiveParam {
 	res := make([]*myutils.SensitiveParam, 0)
@@ -12,6 +12,7 @@ func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) []*myutils.S
 				Type:          myutils.IssueType.SensitiveParam,
 				Name:          sensitive.Name,
 				Match:         match,
+				RawCmd:        s,
 				SensitiveType: sensitive.SensitiveType,
 				Description:   sensitive.Description,
 				Severity:      sensitive.Severity,

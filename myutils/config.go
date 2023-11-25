@@ -63,36 +63,33 @@ var GlobalDBClient struct {
 	Neo4jFlag bool // 标识Neo4j是否成功连接
 }
 
-func init() {
+func LoadConfigFromFile(configFilepath string, logLevel int) {
 	// 获取程序根目录
 	_, filename, _, _ := runtime.Caller(0)
 	root := path.Dir(path.Dir(filename))
-	configFile := path.Join(root, "config.yaml")
 
 	// 加载config.yaml
-	fb, err := os.ReadFile(configFile)
+	fb, err := os.ReadFile(configFilepath)
 	if err != nil {
-		log.Fatalln("[ERROR] Failed to load ", configFile)
+		log.Fatalln("[ERROR] Failed to load ", configFilepath)
 	}
 	if err = yaml.Unmarshal(fb, &GlobalConfig); err != nil {
-		log.Fatalf("[ERROR] Json failed to unmarshal %s with err: %v\n", configFile, err)
+		log.Fatalf("[ERROR] Json failed to unmarshal %s with err: %v\n", configFilepath, err)
 	}
 
 	// 调整相对路径到绝对路径
 	relativeToAbsoluteConfig(root)
 
 	// 初始化日志模块
-	//logFilePath := "/data/docker-crawler/docker-crawler.log"
-	fmt.Println(GlobalConfig.LogFile)
 	logFilepath := GlobalConfig.LogFile
-	if err = configLogger(logFilepath, 1); err != nil {
+	if err = configLogger(logFilepath, logLevel); err != nil {
 		log.Fatalf("[ERROR] Open %s failed with: %s\n", logFilepath, err)
 	} else {
 		fmt.Println("[+] Open log file: ", logFilepath)
 	}
 
 	// 配置http代理
-	configHTTPProxy()
+	configDefaultHTTPProxy()
 	// 配置tls，跳过https证书验证
 	configTLSConfig()
 
