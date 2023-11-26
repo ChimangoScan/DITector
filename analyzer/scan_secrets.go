@@ -13,9 +13,22 @@ func scanSecretsInFilepath(filepath string) ([]*myutils.SecretLeakage, error) {
 
 	var cmd *exec.Cmd
 	if myutils.GlobalConfig.TrufflehogConfig.Verify {
-		cmd = exec.Command(myutils.GlobalConfig.TrufflehogConfig.Filepath, "--json", "filesystem", filepath)
+		cmd = exec.Command(
+			myutils.GlobalConfig.TrufflehogConfig.Filepath,
+			"--json",
+			"--no-update",
+			"filesystem",
+			filepath,
+		)
 	} else {
-		cmd = exec.Command(myutils.GlobalConfig.TrufflehogConfig.Filepath, "--json", "--no-verification", "filesystem", filepath)
+		cmd = exec.Command(
+			myutils.GlobalConfig.TrufflehogConfig.Filepath,
+			"--json",
+			"--no-update",
+			"--no-verification",
+			"filesystem",
+			filepath,
+		)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

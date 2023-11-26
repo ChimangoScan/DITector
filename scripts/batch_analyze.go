@@ -50,6 +50,9 @@ func BatchAnalyzeByName(input string, partial bool) error {
 		}
 		line = strings.TrimSpace(line)
 		imgNameCh <- line
+		if i%100 == 0 {
+			myutils.Logger.Info("BatchAnalyzeByName begin to analyze line:", strconv.Itoa(i), ", image:", line)
+		}
 	}
 
 	close(imgNameCh)
