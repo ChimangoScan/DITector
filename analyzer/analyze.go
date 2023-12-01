@@ -154,10 +154,14 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 		return nil, err
 	}
 	// 结束时删除一切解压内容
-	defer func(name, dir string, cli *client.Client, delFlag bool) {
+	defer func(name, dir, tarFilepath string, cli *client.Client, delFlag bool) {
 		e := os.RemoveAll(dir)
 		if e != nil {
 			myutils.Logger.Error("remove all from dir", dir, "failed with:", e.Error())
+		}
+		e = os.RemoveAll(tarFilepath)
+		if e != nil {
+			myutils.Logger.Error("remove all from file", dir, "failed with:", e.Error())
 		}
 		if delFlag {
 			_, e = cli.ImageRemove(context.TODO(), name, types.ImageRemoveOptions{})
@@ -165,7 +169,7 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 				myutils.Logger.Error("remove image", name, "from Docker failed with:", e.Error())
 			}
 		}
-	}(name, ci.imgFilepath, ci.dockerClient, delFlag)
+	}(name, ci.imgFilepath, ci.imgTarFile, ci.dockerClient, delFlag)
 
 	// 查找数据库中是否已有digest对应的镜像结果
 	analyzeBeginTime := time.Now()
