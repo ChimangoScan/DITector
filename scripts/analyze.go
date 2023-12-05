@@ -109,7 +109,7 @@ func jobGeneratorThreshold(threshold int64, tagNum int, jobCh chan<- job, wg *sy
 			}
 
 			if repoCnt%100 == 0 {
-				fmt.Println("generated all job for repo:", repoCnt)
+				fmt.Println("generated threshold", threshold, "job for repo:", repoCnt)
 			}
 		}
 
