@@ -12,6 +12,7 @@ import (
 
 var DefaultAnalyzer *ImageAnalyzer
 var DefaultAnalyzerE error
+var GlobalDockerClient, _ = client.NewClientWithOpts(client.FromEnv)
 
 // AnalyzeImageByName analyzes image totally, including metadata, configuration, content of the image.
 func AnalyzeImageByName(name string, delFlag bool) (*myutils.ImageResult, error) {
@@ -153,23 +154,6 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 		ci.wg.Wait()
 		return nil, err
 	}
-	// 结束时删除一切解压内容
-	defer func(name, dir, tarFilepath string, cli *client.Client, delFlag bool) {
-		e := os.RemoveAll(dir)
-		if e != nil {
-			myutils.Logger.Error("remove all from dir", dir, "failed with:", e.Error())
-		}
-		e = os.RemoveAll(tarFilepath)
-		if e != nil {
-			myutils.Logger.Error("remove all from file", dir, "failed with:", e.Error())
-		}
-		if delFlag {
-			_, e = cli.ImageRemove(context.TODO(), name, types.ImageRemoveOptions{})
-			if e != nil {
-				myutils.Logger.Error("remove image", name, "from Docker failed with:", e.Error())
-			}
-		}
-	}(name, ci.imgFilepath, ci.imgTarFile, ci.dockerClient, delFlag)
 
 	// 查找数据库中是否已有digest对应的镜像结果
 	analyzeBeginTime := time.Now()
@@ -248,6 +232,36 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 				myutils.Logger.Error("update ImageResult", imgRes.Name, imgRes.Digest, "failed with:", e.Error())
 			}
 		}(res)
+	}
+
+	// 结束时删除一切解压内容
+	//ci.wg.Add(1)
+	go func(dir string) {
+		//defer ci.wg.Done()
+		e := os.RemoveAll(dir)
+		if e != nil {
+			myutils.Logger.Error("remove all from dir", dir, "failed with:", e.Error())
+		}
+	}(ci.imgFilepath)
+
+	//ci.wg.Add(1)
+	go func(tarFilepath string) {
+		//defer ci.wg.Done()
+		e := os.RemoveAll(tarFilepath)
+		if e != nil {
+			myutils.Logger.Error("remove all from file", tarFilepath, "failed with:", e.Error())
+		}
+	}(ci.imgTarFile)
+
+	if delFlag {
+		//ci.wg.Add(1)
+		go func(name string) {
+			//defer ci.wg.Done()
+			_, e := GlobalDockerClient.ImageRemove(context.TODO(), name, types.ImageRemoveOptions{})
+			if e != nil {
+				myutils.Logger.Error("remove image", name, "from Docker failed with:", e.Error())
+			}
+		}(name)
 	}
 
 	ci.wg.Wait()
