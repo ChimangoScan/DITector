@@ -124,11 +124,15 @@ func analyzeThresholdWorker(workerId int, jobCh <-chan job, wg *sync.WaitGroup) 
 			_, err := analyzer.AnalyzeImagePartialByName(j.name)
 			if err != nil {
 				myutils.Logger.Error("analyzeThresholdWorker", strconv.Itoa(workerId), "analyze partial image", j.name, "failed with:", err.Error())
+			} else {
+				myutils.Logger.Debug("analyzeThresholdWorker", strconv.Itoa(workerId), "analyze partial image", j.name, "succeeded")
 			}
 		} else {
 			_, err := analyzer.AnalyzeImageByName(j.name, true)
 			if err != nil {
 				myutils.Logger.Error("analyzeThresholdWorker", strconv.Itoa(workerId), "analyze image", j.name, "failed with:", err.Error())
+			} else {
+				myutils.Logger.Debug("analyzeThresholdWorker", strconv.Itoa(workerId), "analyze image", j.name, "succeeded")
 			}
 		}
 	}

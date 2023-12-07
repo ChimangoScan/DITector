@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -324,10 +325,16 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 
 // scaVul 对层文件进行SCA并进行漏洞匹配
 func scaVul(layerDir, dest string) (*AskYReport, error) {
-	// 调用asky脚本本地SCA
-	cmd := exec.Command("bash", myutils.GlobalConfig.AskyConfig.Filepath, "-s", layerDir, "-o", dest)
+	// 调用asky脚本本地SCA，设置超时
+	timeout := 1 * time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", myutils.GlobalConfig.AskyConfig.Filepath, "-s", layerDir, "-o", dest)
 	err := cmd.Run()
-	if err != nil {
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("sca with asky for filepath %s timeout with %s", layerDir, timeout)
+	} else if err != nil {
 		return nil, err
 	}
 

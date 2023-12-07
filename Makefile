@@ -8,6 +8,10 @@ build:
 clean:
 	@if [ -f ${BINARY} ] ; then rm ${BINARY} ; fi
 
+rebuild:
+	@make clean
+	@make build
+
 test:
 	@make build
 	@./${BINARY}

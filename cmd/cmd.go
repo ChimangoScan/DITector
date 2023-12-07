@@ -42,6 +42,16 @@ var RootCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// 仅用作测试
+		//imgList := [...]string{"harbur/kubebot:latest", "cfinfrastructure/terraform:latest", "baiyuetribe/onekey:vipvideo"}
+		//for _, img := range imgList {
+		//	_, err := analyzer.AnalyzeImageByName(img, true)
+		//	if err != nil {
+		//		fmt.Println("analyze image", img, "failed with:", err)
+		//	} else {
+		//		fmt.Println("analyze image", img, "succeeded")
+		//	}
+		//}
+		fmt.Println("env tmp dir:", os.TempDir())
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// 所有命令退出前的清理工作
