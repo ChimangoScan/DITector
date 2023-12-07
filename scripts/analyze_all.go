@@ -15,7 +15,7 @@ type job struct {
 	partial bool
 }
 
-func AnalyzeAll() error {
+func AnalyzeAll(page int64) error {
 	// 配置线程数
 	maxThreads := runtime.NumCPU()
 	if myutils.GlobalConfig.MaxThread > 0 && myutils.GlobalConfig.MaxThread < maxThreads {
@@ -33,7 +33,7 @@ func AnalyzeAll() error {
 	}
 
 	wg.Add(1)
-	go jobGeneratorAll(jobCh, &wg)
+	go jobGeneratorAll(page, jobCh, &wg)
 
 	wg.Wait()
 
@@ -41,7 +41,7 @@ func AnalyzeAll() error {
 }
 
 // jobGeneratorAll 从MongoDB读取repo数据
-func jobGeneratorAll(jobCh chan<- job, wg *sync.WaitGroup) {
+func jobGeneratorAll(page int64, jobCh chan<- job, wg *sync.WaitGroup) {
 	defer close(jobCh)
 	defer wg.Done()
 	if !myutils.GlobalDBClient.MongoFlag {
@@ -49,7 +49,7 @@ func jobGeneratorAll(jobCh chan<- job, wg *sync.WaitGroup) {
 	}
 
 	var repoCnt = 0
-	var repoPage int64 = 1
+	var repoPage int64 = page
 	var pageSize int64 = 5
 	for {
 		repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(nil, repoPage, pageSize)

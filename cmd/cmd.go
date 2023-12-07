@@ -137,12 +137,14 @@ var executeCmd = &cobra.Command{
 		case "analyze-threshold":
 			threshold, _ := cmd.Flags().GetInt64("threshold")
 			tagNum, _ := cmd.Flags().GetInt("tags")
-			err := scripts.AnalyzePullCountOverThreshold(threshold, tagNum)
+			page, _ := cmd.Flags().GetInt64("page")
+			err := scripts.AnalyzePullCountOverThreshold(threshold, tagNum, page)
 			if err != nil {
 				log.Fatalln("analyze-threshold got error:", err)
 			}
 		case "analyze-all":
-			err := scripts.AnalyzeAll()
+			page, _ := cmd.Flags().GetInt64("page")
+			err := scripts.AnalyzeAll(page)
 			if err != nil {
 				log.Fatalln("analyze-all got error:", err)
 			}
@@ -168,6 +170,7 @@ func init() {
 	executeCmd.Flags().StringP("file", "p", "", "input file for scripts, like batch-analyze")
 	executeCmd.Flags().Int64("threshold", 1000000, "pull_count threshold to analyze an image")
 	executeCmd.Flags().Int("tags", 3, "the top tag-num recently updated tags to analyze")
+	executeCmd.Flags().Int64("page", 1, "start page for analyzing multiple repos from MongoDB")
 
 	// 向root命令中注册命令
 	RootCmd.AddCommand(

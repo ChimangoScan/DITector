@@ -19,7 +19,7 @@ import (
 )
 
 // AnalyzePullCountOverThreshold 分析pull_count > threshold时
-func AnalyzePullCountOverThreshold(threshold int64, tagNum int) error {
+func AnalyzePullCountOverThreshold(threshold int64, tagNum int, page int64) error {
 	// 配置线程数
 	maxThreads := runtime.NumCPU()
 	if myutils.GlobalConfig.MaxThread > 0 && myutils.GlobalConfig.MaxThread < maxThreads {
@@ -37,7 +37,7 @@ func AnalyzePullCountOverThreshold(threshold int64, tagNum int) error {
 	}
 
 	wg.Add(1)
-	go jobGeneratorThreshold(threshold, tagNum, jobCh, &wg)
+	go jobGeneratorThreshold(threshold, tagNum, page, jobCh, &wg)
 
 	wg.Wait()
 
@@ -45,7 +45,7 @@ func AnalyzePullCountOverThreshold(threshold int64, tagNum int) error {
 }
 
 // jobGeneratorThreshold 从MongoDB读取repo数据，生成任务传入通道
-func jobGeneratorThreshold(threshold int64, tagNum int, jobCh chan<- job, wg *sync.WaitGroup) {
+func jobGeneratorThreshold(threshold int64, tagNum int, page int64, jobCh chan<- job, wg *sync.WaitGroup) {
 	defer close(jobCh)
 	defer wg.Done()
 	if !myutils.GlobalDBClient.MongoFlag {
@@ -53,7 +53,7 @@ func jobGeneratorThreshold(threshold int64, tagNum int, jobCh chan<- job, wg *sy
 	}
 
 	var repoCnt = 0
-	var repoPage int64 = 1
+	var repoPage int64 = page
 	var pageSize int64 = 5
 	for {
 		repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByPullCountPaged(threshold, repoPage, pageSize)
