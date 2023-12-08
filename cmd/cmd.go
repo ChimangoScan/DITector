@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"log"
 	"os"
+	"runtime"
 )
 
 var logLevelStr string
@@ -52,6 +53,7 @@ var RootCmd = &cobra.Command{
 		//	}
 		//}
 		fmt.Println("env tmp dir:", os.TempDir())
+		fmt.Println("runtime thread:", runtime.NumCPU())
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// 所有命令退出前的清理工作

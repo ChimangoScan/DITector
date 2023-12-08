@@ -23,6 +23,8 @@ func AnalyzeAll(page int64) error {
 		runtime.GOMAXPROCS(maxThreads)
 	}
 
+	myutils.Logger.Debug(fmt.Sprintf("analyze-all start with threads: %d", maxThreads))
+
 	// 初始化控制并发线程数的管道
 	jobCh := make(chan job)
 	wg := sync.WaitGroup{}
@@ -140,7 +142,7 @@ func jobGeneratorAll(page int64, jobCh chan<- job, wg *sync.WaitGroup) {
 			}
 
 			if repoCnt%100 == 0 {
-				fmt.Println("generated all job for repo:", repoCnt)
+				fmt.Println("generated all job for repo:", repoCnt, ", page:", repoPage)
 			}
 		}
 

@@ -2,18 +2,26 @@ package analyzer
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/Musso12138/docker-scan/myutils"
 	"os/exec"
+	"time"
 )
 
 // scanSecretsInFilepath 调用trufflehog扫描指定文件路径下的隐私信息
 func scanSecretsInFilepath(filepath string) ([]*myutils.SecretLeakage, error) {
 	res := make([]*myutils.SecretLeakage, 0)
 
+	timeout := 1 * time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if myutils.GlobalConfig.TrufflehogConfig.Verify {
-		cmd = exec.Command(
+		cmd = exec.CommandContext(
+			ctx,
 			myutils.GlobalConfig.TrufflehogConfig.Filepath,
 			"--json",
 			"--no-update",
@@ -21,7 +29,8 @@ func scanSecretsInFilepath(filepath string) ([]*myutils.SecretLeakage, error) {
 			filepath,
 		)
 	} else {
-		cmd = exec.Command(
+		cmd = exec.CommandContext(
+			ctx,
 			myutils.GlobalConfig.TrufflehogConfig.Filepath,
 			"--json",
 			"--no-update",
@@ -66,6 +75,9 @@ func scanSecretsInFilepath(filepath string) ([]*myutils.SecretLeakage, error) {
 	}
 
 	if err = cmd.Wait(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			myutils.Logger.Error(fmt.Sprintf("wait for cmd exec %s failed with: timeout %s", cmd.Path, timeout))
+		}
 		myutils.Logger.Error("wait for cmd exec", cmd.Path, "failed with:", err.Error())
 		return nil, err
 	}

@@ -330,7 +330,8 @@ func scaVul(layerDir, dest string) (*AskYReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", myutils.GlobalConfig.AskyConfig.Filepath, "-s", layerDir, "-o", dest)
+	cmd := exec.CommandContext(ctx, myutils.GlobalConfig.AskyConfig.Filepath, "-s", layerDir, "-o", dest)
+	//cmd := exec.CommandContext(ctx, "bash", myutils.GlobalConfig.AskyConfig.Filepath, "-s", layerDir, "-o", dest)
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("sca with asky for filepath %s timeout with %s", layerDir, timeout)

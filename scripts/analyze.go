@@ -27,6 +27,8 @@ func AnalyzePullCountOverThreshold(threshold int64, tagNum int, page int64) erro
 		runtime.GOMAXPROCS(maxThreads)
 	}
 
+	myutils.Logger.Debug(fmt.Sprintf("analyze-threshold start with threads: %d", maxThreads))
+
 	// 初始化控制并发线程数的管道
 	jobCh := make(chan job)
 	wg := sync.WaitGroup{}
@@ -108,8 +110,8 @@ func jobGeneratorThreshold(threshold int64, tagNum int, page int64, jobCh chan<-
 				}
 			}
 
-			if repoCnt%100 == 0 {
-				fmt.Println("generated threshold", threshold, "job for repo:", repoCnt)
+			if repoCnt%10 == 0 {
+				fmt.Println("generated threshold", threshold, "job for repo:", repoCnt, ", page:", repoPage)
 			}
 		}
 

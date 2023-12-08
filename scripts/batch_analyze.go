@@ -28,6 +28,8 @@ func BatchAnalyzeByName(input string, partial bool) error {
 		runtime.GOMAXPROCS(maxThreads)
 	}
 
+	myutils.Logger.Debug(fmt.Sprintf("batch-analyze start with threads: %d", maxThreads))
+
 	// 初始化控制并发线程数的管道
 	imgNameCh := make(chan string)
 	wg := sync.WaitGroup{}
