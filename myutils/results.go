@@ -56,6 +56,9 @@ type LayerResult struct {
 	Size        int64
 	Digest      string
 
+	LastAnalyzed string `bson:"last_analyzed"`
+	AnalyzeTime  string `bson:"analyze_time"`
+
 	Total        int // from qianxin asky
 	ComponentNum int
 	Components   []*Component

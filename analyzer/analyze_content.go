@@ -213,6 +213,8 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 		}
 	}
 
+	layerBeginTime := time.Now()
+	lastAnalyzed := myutils.GetLocalNowTimeStr()
 	var err error
 
 	resLock := sync.Mutex{}
@@ -320,6 +322,12 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 	}
 
 	wg.Wait()
+
+	// 添加层检测s
+	layerAnalyzeTime := time.Since(layerBeginTime).String()
+	res.AnalyzeTime = layerAnalyzeTime
+	res.LastAnalyzed = lastAnalyzed
+
 	return res, false, err
 }
 
@@ -398,13 +406,19 @@ func postCreateAskYTask(client *http.Client, dest string) (*AskYTask, error) {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// 检查http响应，更稳定获取任务信息
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected http status code: %d", resp.StatusCode)
+	}
+
+	var respBody bytes.Buffer
+	_, err = io.Copy(&respBody, resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
 	task := new(AskYTask)
-	if err = json.Unmarshal(respBody, task); err != nil {
+	if err = json.Unmarshal(respBody.Bytes(), task); err != nil {
 		return nil, err
 	}
 	if task.Data.Status != "0" && task.Data.Status != "1" && task.Data.Status != "2" {
