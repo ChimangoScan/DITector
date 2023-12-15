@@ -49,6 +49,8 @@ type ContentResult struct {
 	Vulnerabilities   []*Vulnerability    `json:"vulnerabilities" bson:"vulnerabilities"`
 	Misconfigurations []*Misconfiguration `json:"misconfiguration" bson:"misconfigurations"`
 	MaliciousFiles    []*MaliciousFile    `json:"malicious_files" bson:"malicious_files"`
+
+	LayersGotErr []string `json:"layers_got_err" bson:"layers_got_err"`
 }
 
 type LayerResult struct {
@@ -121,6 +123,8 @@ func NewContentResult() *ContentResult {
 	res.Vulnerabilities = make([]*Vulnerability, 0)
 	res.Misconfigurations = make([]*Misconfiguration, 0)
 	res.MaliciousFiles = make([]*MaliciousFile, 0)
+
+	res.LayersGotErr = make([]string, 0)
 
 	return res
 }

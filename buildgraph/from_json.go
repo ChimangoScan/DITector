@@ -1,8 +1,8 @@
 package buildgraph
 
 import (
+	"github.com/Musso12138/docker-scan/myutils"
 	"go.mongodb.org/mongo-driver/mongo"
-	"myutils"
 	"runtime"
 )
 

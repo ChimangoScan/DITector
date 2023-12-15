@@ -109,7 +109,7 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 
 	// 逐层分析layer内容，写入对应LayerResult
 	for _, ld := range ci.layerWithContentList {
-		layerRes, fromMongo, err := analyzer.analyzeLayer(ci.layerInfoMap[ld], fileWithIssues, defaultExecFiles)
+		layerRes, fromMongo, err, layerGotErr := analyzer.analyzeLayer(ci.layerInfoMap[ld], fileWithIssues, defaultExecFiles)
 		if err != nil {
 			myutils.Logger.Error("analyze layer", ci.layerInfoMap[ld].digest, "layer dir path", ci.layerInfoMap[ld].localFilePath, "failed with:", err.Error())
 			continue
@@ -117,7 +117,7 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 		ir.LayerResults[ld] = layerRes
 
 		// 新分析的结果存入数据库
-		if !fromMongo {
+		if !fromMongo && !layerGotErr {
 			if myutils.GlobalDBClient.MongoFlag {
 				ci.wg.Add(1)
 				go func(layerRes *myutils.LayerResult) {
@@ -127,6 +127,11 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 					}
 				}(layerRes)
 			}
+		}
+
+		// 记录检测过程中出错的layer digest列表
+		if layerGotErr {
+			res.LayersGotErr = append(res.LayersGotErr, ld)
 		}
 
 		// 把有问题的结果文件放入当前状态表
@@ -205,17 +210,18 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 
 // analyzeLayer traverses and analyzes files under inputted layerDir,
 // and writes results directly to layerResult.
-func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map[string]bool, defaultExecFiles map[string]struct{}) (*myutils.LayerResult, bool, error) {
+func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map[string]bool, defaultExecFiles map[string]struct{}) (*myutils.LayerResult, bool, error, bool) {
 	// 数据库在线，检查是否已被分析
 	if myutils.GlobalDBClient.MongoFlag {
 		if lr, err := myutils.GlobalDBClient.Mongo.FindLayerResultByDigest(layer.digest); err == nil {
-			return lr, true, nil
+			return lr, true, nil, false
 		}
 	}
 
 	layerBeginTime := time.Now()
 	lastAnalyzed := myutils.GetLocalNowTimeStr()
 	var err error
+	var layerGotErr bool
 
 	resLock := sync.Mutex{}
 	res := myutils.NewLayerResult()
@@ -227,12 +233,13 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 
 	// SCA: 调用asky对本地层文件做SCA和漏洞匹配
 	wg.Add(1)
-	go func(layerRootDir, layerDir string, layerRes *myutils.LayerResult) {
+	go func(layerRootDir, layerDir string, layerRes *myutils.LayerResult, gotErrFlag *bool) {
 		defer wg.Done()
 
 		report, err := scaVul(layerDir, path.Join(layerRootDir, "sca.json"))
 		if err != nil {
 			myutils.Logger.Error("sca and matches vuln for filepath", layerDir, "failed with:", err.Error())
+			*gotErrFlag = true
 			return
 		}
 
@@ -292,16 +299,17 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 		layerRes.ComponentNum = report.Data.ReportData.ComponentNum
 		layerRes.Components = componentList
 		layerRes.Vulnerabilities = vulnList
-	}(layer.localRootFilePath, layer.localFilePath, res)
+	}(layer.localRootFilePath, layer.localFilePath, res, &layerGotErr)
 
 	// 隐私泄露扫描：调用trufflehog对层的解压文件目录扫描
 	wg.Add(1)
-	go func(layerRootDir, layerDir string, layerRes *myutils.LayerResult) {
+	go func(layerRootDir, layerDir string, layerRes *myutils.LayerResult, gotErrFlag *bool) {
 		defer wg.Done()
 
 		secrets, err := scanSecretsInFilepath(layerDir)
 		if err != nil {
 			myutils.Logger.Error("scanSecretsInFilepath", layerDir, "failed with:", err.Error())
+			*gotErrFlag = true
 			return
 		}
 
@@ -314,11 +322,12 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 		resLock.Lock()
 		defer resLock.Unlock()
 		layerRes.SecretLeakages = secrets
-	}(layer.localRootFilePath, layer.localFilePath, res)
+	}(layer.localRootFilePath, layer.localFilePath, res, &layerGotErr)
 
 	// 遍历layer目录，发现需要扫描错误配置/恶意软件的文件，并进行相应扫描
 	if err = filepath.Walk(layer.localFilePath, analyzer.scanLayerFunc(layer, fileWithIssues, defaultExecFiles, res, &resLock)); err != nil {
 		myutils.Logger.Error("walk and scan layer dir", layer.localFilePath, "failed with:", err.Error())
+		layerGotErr = true
 	}
 
 	wg.Wait()
@@ -328,7 +337,7 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 	res.AnalyzeTime = layerAnalyzeTime
 	res.LastAnalyzed = lastAnalyzed
 
-	return res, false, err
+	return res, false, err, layerGotErr
 }
 
 // scaVul 对层文件进行SCA并进行漏洞匹配
@@ -408,6 +417,10 @@ func postCreateAskYTask(client *http.Client, dest string) (*AskYTask, error) {
 
 	// 检查http响应，更稳定获取任务信息
 	if resp.StatusCode != http.StatusOK {
+		stat, err := file.Stat()
+		if err == nil {
+			myutils.Logger.Error(fmt.Sprintf("unexpected http status code: %d, with file size: %d", resp.StatusCode, stat.Size()))
+		}
 		return nil, fmt.Errorf("unexpected http status code: %d", resp.StatusCode)
 	}
 

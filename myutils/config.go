@@ -81,6 +81,13 @@ func LoadConfigFromFile(configFilepath string, logLevel int) {
 		log.Fatalf("[ERROR] Json failed to unmarshal %s with err: %v\n", configFilepath, err)
 	}
 
+	// 配置最大线程数
+	if GlobalConfig.MaxThread > 0 && GlobalConfig.MaxThread < runtime.NumCPU() {
+		runtime.GOMAXPROCS(GlobalConfig.MaxThread)
+	} else {
+		GlobalConfig.MaxThread = runtime.NumCPU()
+	}
+
 	// 调整相对路径到绝对路径
 	relativeToAbsoluteConfig(root)
 

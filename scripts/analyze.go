@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,19 +20,18 @@ import (
 // AnalyzePullCountOverThreshold 分析pull_count > threshold时
 func AnalyzePullCountOverThreshold(threshold int64, tagNum int, page int64) error {
 	// 配置线程数
-	maxThreads := runtime.NumCPU()
-	if myutils.GlobalConfig.MaxThread > 0 && myutils.GlobalConfig.MaxThread < maxThreads {
-		maxThreads = myutils.GlobalConfig.MaxThread
-		runtime.GOMAXPROCS(maxThreads)
-	}
-
-	myutils.Logger.Debug(fmt.Sprintf("analyze-threshold start with threads: %d", maxThreads))
+	//maxThreads := runtime.NumCPU()
+	//if myutils.GlobalConfig.MaxThread > 0 && myutils.GlobalConfig.MaxThread < maxThreads {
+	//	maxThreads = myutils.GlobalConfig.MaxThread
+	//	runtime.GOMAXPROCS(maxThreads)
+	//}
+	myutils.Logger.Debug(fmt.Sprintf("analyze-threshold start with threads: %d", myutils.GlobalConfig.MaxThread))
 
 	// 初始化控制并发线程数的管道
 	jobCh := make(chan job)
 	wg := sync.WaitGroup{}
 
-	for w := 1; w <= maxThreads; w++ {
+	for w := 1; w <= myutils.GlobalConfig.MaxThread; w++ {
 		wg.Add(1)
 		go analyzeThresholdWorker(w, jobCh, &wg)
 	}
