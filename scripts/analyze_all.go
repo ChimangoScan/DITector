@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type job struct {
@@ -93,30 +94,34 @@ func jobGeneratorAll(page int64, jobCh chan<- job, wg *sync.WaitGroup) {
 			}
 
 			// 检查时间顺序，顺序不对从API拿新的repo和tags
-			if len(tagDocs) > 0 && tagDocs[0].LastUpdated.After(repoDoc.LastUpdated) {
-				repo, err := myutils.ReqRepoMetadata(repoDoc.Namespace, repoDoc.Name)
-				if err != nil {
-					myutils.Logger.Error(fmt.Sprintf("request metadata of repository %s/%s from API got error: %s", repoDoc.Namespace, repoDoc.Name, err))
-				} else {
-					if e := myutils.GlobalDBClient.Mongo.UpdateRepository(repo); e != nil {
-						myutils.Logger.Error("update metadata of repo", repo.Namespace, repo.Name, "failed with:", e.Error())
-					}
-					// tag已经是从API获取的了，无需重复获取
-					if !fromAPIFlag {
-						tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, 10)
-						if err != nil {
-							myutils.Logger.Error(fmt.Sprintf("request tags for repository %s/%s from API got error: %s", repoDoc.Namespace, repoDoc.Name, err))
-							continue
+			if len(tagDocs) > 0 {
+				tagLastUpdatedTime, _ := time.Parse(time.RFC3339Nano, tagDocs[0].LastUpdated)
+				repoLastUpdatedTime, _ := time.Parse(time.RFC3339Nano, repoDoc.LastUpdated)
+				if tagLastUpdatedTime.After(repoLastUpdatedTime) {
+					repo, err := myutils.ReqRepoMetadata(repoDoc.Namespace, repoDoc.Name)
+					if err != nil {
+						myutils.Logger.Error(fmt.Sprintf("request metadata of repository %s/%s from API got error: %s", repoDoc.Namespace, repoDoc.Name, err))
+					} else {
+						if e := myutils.GlobalDBClient.Mongo.UpdateRepository(repo); e != nil {
+							myutils.Logger.Error("update metadata of repo", repo.Namespace, repo.Name, "failed with:", e.Error())
 						}
-						// 从API获取的部分向数据库中备份一下
-						for _, tagDoc := range tagDocs {
-							wg.Add(1)
-							go func(tagMetadata *myutils.Tag) {
-								defer wg.Done()
-								if e := myutils.GlobalDBClient.Mongo.UpdateTag(tagMetadata); e != nil {
-									myutils.Logger.Error("update metadata of tag", tagMetadata.RepositoryNamespace, tagMetadata.RepositoryName, tagMetadata.Name, "failed with:", e.Error())
-								}
-							}(tagDoc)
+						// tag已经是从API获取的了，无需重复获取
+						if !fromAPIFlag {
+							tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, 10)
+							if err != nil {
+								myutils.Logger.Error(fmt.Sprintf("request tags for repository %s/%s from API got error: %s", repoDoc.Namespace, repoDoc.Name, err))
+								continue
+							}
+							// 从API获取的部分向数据库中备份一下
+							for _, tagDoc := range tagDocs {
+								wg.Add(1)
+								go func(tagMetadata *myutils.Tag) {
+									defer wg.Done()
+									if e := myutils.GlobalDBClient.Mongo.UpdateTag(tagMetadata); e != nil {
+										myutils.Logger.Error("update metadata of tag", tagMetadata.RepositoryNamespace, tagMetadata.RepositoryName, tagMetadata.Name, "failed with:", e.Error())
+									}
+								}(tagDoc)
+							}
 						}
 					}
 				}

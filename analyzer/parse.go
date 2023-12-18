@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/Musso12138/docker-scan/myutils"
+	"time"
 )
 
 // ParsePartial 仅解析指定镜像的元数据
@@ -124,12 +125,14 @@ func (currI *CurrentImage) parseServerPlatform() error {
 // checkUpdateOrder 检查镜像创建时间与image, tag, repository元数据间的更新时间关系，
 // 根据时间顺序逻辑判断是否存在数据过时问题，如果有数据过时，则从API获取过时数据补充到
 func (currI *CurrentImage) checkUpdateOrder() error {
-	if currI.configuration.Created.After(currI.metadata.imageMetadata.LastPushed) ||
-		currI.configuration.Created.After(currI.metadata.tagMetadata.TagLastPushed) ||
-		currI.metadata.imageMetadata.LastPushed.After(currI.metadata.tagMetadata.TagLastPushed) ||
-		currI.configuration.Created.After(currI.metadata.repositoryMetadata.LastUpdated) ||
-		currI.metadata.imageMetadata.LastPushed.After(currI.metadata.repositoryMetadata.LastUpdated) ||
-		currI.metadata.tagMetadata.TagLastPushed.After(currI.metadata.repositoryMetadata.LastUpdated) {
+	imgLastPushedTime, _ := time.Parse(time.RFC3339Nano, currI.metadata.imageMetadata.LastPushed)
+	tagLastPushedTime, _ := time.Parse(time.RFC3339Nano, currI.metadata.tagMetadata.TagLastPushed)
+	repoLastUpdatedTime, _ := time.Parse(time.RFC3339Nano, currI.metadata.repositoryMetadata.LastUpdated)
+
+	if currI.configuration.Created.After(imgLastPushedTime) ||
+		currI.configuration.Created.After(tagLastPushedTime) || imgLastPushedTime.After(tagLastPushedTime) ||
+		currI.configuration.Created.After(repoLastUpdatedTime) || imgLastPushedTime.After(repoLastUpdatedTime) ||
+		tagLastPushedTime.After(repoLastUpdatedTime) {
 		if err := currI.parseMetadata(true, true); err != nil {
 			return err
 		}

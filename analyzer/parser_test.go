@@ -69,8 +69,23 @@ func TestExtractRecommendCmd(t *testing.T) {
 }
 
 func TestTimeZero(t *testing.T) {
-	var tz time.Time
-	var nt time.Time = time.Now()
-	fmt.Println(tz.After(nt))
-	fmt.Println(tz.String())
+	a, b, c := 1, 2, 3
+	for i, x := range []*int{&a, &b, &c} {
+		if i == 1 {
+			tmp := 100
+			x = &tmp
+		}
+		fmt.Println(*x)
+	}
+}
+
+func TestParseTIme(t *testing.T) {
+	repo, _ := time.Parse(time.RFC3339Nano, "2023-12-16T23:13:39.049818Z")
+	fmt.Println(repo)
+	tag, _ := time.Parse(time.RFC3339Nano, "2023-12-16T23:13:38.741329Z")
+	fmt.Println(tag)
+	img, _ := time.Parse(time.RFC3339Nano, "2023-12-16T23:12:54.506925Z")
+	fmt.Println(img)
+	sameTime, _ := time.Parse(time.RFC3339Nano, "2023-12-16T23:13:38.741329Z")
+	fmt.Println(sameTime.After(tag))
 }

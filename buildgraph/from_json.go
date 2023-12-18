@@ -215,7 +215,7 @@ func StoreImageScheduler() {
 				myutils.Logger.Error("Mongo insert image", image.Image.Digest, "failed with err:"+err.Error())
 			}
 		}
-		myNeo4jDriver.InsertImageToNeo4j(image)
+		//myNeo4jDriver.InsertImageToNeo4jOld(image)
 	}
 	chanDoneImage <- struct{}{}
 }

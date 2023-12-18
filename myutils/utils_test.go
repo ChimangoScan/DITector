@@ -29,6 +29,27 @@ func TestSha256File(t *testing.T) {
 	fmt.Println(h, time.Since(begin).String())
 }
 
+func TestSha256Str(t *testing.T) {
+	configDefaultHTTPProxy("http://127.0.0.1:7890", "http://127.0.0.1:7890")
+	imgs, _ := ReqImagesMetadata("library", "mongo", "latest")
+	img := imgs[0]
+
+	begin := time.Now()
+	preID := ""
+	for _, layer := range img.Layers {
+		dig := ""
+		if layer.Digest != "" {
+			dig = Sha256Str(layer.Digest)
+		} else {
+			dig = Sha256Str(layer.Instruction)
+		}
+		currID := Sha256Str(preID + dig)
+		fmt.Println(currID)
+		preID = currID
+	}
+	fmt.Println(time.Since(begin))
+}
+
 func TestRelPath(t *testing.T) {
 	fmt.Println(filepath.Rel("/aaa/bbb/ccc/layer/", "/aaa/bbb/ccc/layer/etc/library"))
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-	"strconv"
 )
 
 type MyNeo4j struct {
@@ -76,56 +75,100 @@ func NewNeo4jDriver(target, username, password string, initFlag bool) (*MyNeo4j,
 	return ret, err
 }
 
-// InsertImageToNeo4j 将
-func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(image *ImageSource) {
+// InsertImageToNeo4j 将镜像插入到neo4j数据库中，imgName要求为registry/namespace/repository:tag@digest的格式
+func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(imgName string, image *Image) {
 	// 创建一个neo4j session
 	ctx := context.Background()
 	session := neo4jDriver.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 
-	previousHash := ""      // 用于存上一个hash(1-2)
-	accumulateLayerID := "" // 用于堆1、1-2、1-2-5，方便直接计算hash
-	accumulateHash := ""    // =hash(accumulateLayerID)，用于存当前hash(1-2-5)
+	// 初始化变量
+	preID := "" // 用于存储上一个镜像层对应Layer节点的ID
 
-	lastLayerIndex := 0 // 仍有文件内容的最顶层在Image.Layers中的index
-	imageName := image.Namespace + "/" + image.RepositoryName + ":" + image.TagName
-
-	for i, _ := range image.Image.Layers {
-		// 跳过没有文件内容的层
-		if image.Image.Layers[i].Size == 0 {
-			continue
+	// 遍历镜像层
+	for i, layer := range image.Layers {
+		// 有文件内容的层基于digest计算，没有文件内容的层基于命令计算
+		dig := ""
+		if layer.Digest != "" {
+			dig = Sha256Str(layer.Digest)
+		} else {
+			dig = Sha256Str(layer.Instruction)
+		}
+		if dig == "" {
+			Logger.Error(fmt.Sprintf("digest of layer %d of image %s still none after calculating SHA256", i, imgName))
+			return
 		}
 
-		// 计算hash(1-2-5)，转成string类型
-		curLayer := image.Image.Layers[i]
-		layerID := curLayer.Digest
-		accumulateLayerID += layerID
-		accumulateHash = Sha256Str(accumulateLayerID)
+		// 计算当前层的Layer节点ID
+		currID := Sha256Str(preID + dig)
 
-		// 插入层及层间的边
-		_, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, previousHash, accumulateHash, curLayer))
-		if err != nil {
-			Logger.Error("Insert", imageName, "layer", layerID, "to neo4j failed with:", err.Error())
-			fmt.Printf("[ERROR] Insert "+imageName+" layer "+layerID+" to neo4j failed with: %s\n", err)
-			break
+		// 将当前Layer节点存储到数据库
+		if _, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, preID, currID, layer)); err != nil {
+			Logger.Error(fmt.Sprintf("insert layer %d of image %s failed with: %s", i, imgName, err))
+			return
 		}
 
-		// 更新previousHash，下一轮插入节点的父节点ID应为previousHash
-		previousHash = accumulateHash
-		// 记录最后一层的index，
-		lastLayerIndex = i
+		preID = currID
 	}
 
-	// 需要将image信息加入到节点属性中
-	_, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imageName, accumulateHash))
-	if err != nil {
-		Logger.Error(fmt.Sprintf("Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s", err))
-		fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s\n", err)
+	// 将image name放到最后一层的Layer节点上
+	if _, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imgName, preID)); err != nil {
+		Logger.Error(fmt.Sprintf("insert name of image %s failed with: %s", imgName, err))
+		return
 	}
 }
 
+//// InsertImageToNeo4jOld Deprecated: 根据爬虫json格式结果将镜像元数据存储到neo4j数据库中
+//// 没有考虑未产生文件修改的镜像的层（配置命令）
+//func (neo4jDriver *MyNeo4j) InsertImageToNeo4jOld(image *ImageSource) {
+//	// 创建一个neo4j session
+//	ctx := context.Background()
+//	session := neo4jDriver.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+//	defer session.Close(ctx)
+//
+//	previousHash := ""      // 用于存上一个hash(1-2)
+//	accumulateLayerID := "" // 用于堆1、1-2、1-2-5，方便直接计算hash
+//	accumulateHash := ""    // =hash(accumulateLayerID)，用于存当前hash(1-2-5)
+//
+//	lastLayerIndex := 0 // 仍有文件内容的最顶层在Image.Layers中的index
+//	imageName := image.Namespace + "/" + image.RepositoryName + ":" + image.TagName
+//
+//	for i, _ := range image.Image.Layers {
+//		// 跳过没有文件内容的层
+//		if image.Image.Layers[i].Size == 0 {
+//			continue
+//		}
+//
+//		// 计算hash(1-2-5)，转成string类型
+//		curLayer := image.Image.Layers[i]
+//		layerID := curLayer.Digest
+//		accumulateLayerID += layerID
+//		accumulateHash = Sha256Str(accumulateLayerID)
+//
+//		// 插入层及层间的边
+//		_, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, previousHash, accumulateHash, curLayer))
+//		if err != nil {
+//			Logger.Error("Insert", imageName, "layer", layerID, "to neo4j failed with:", err.Error())
+//			fmt.Printf("[ERROR] Insert "+imageName+" layer "+layerID+" to neo4j failed with: %s\n", err)
+//			break
+//		}
+//
+//		// 更新previousHash，下一轮插入节点的父节点ID应为previousHash
+//		previousHash = accumulateHash
+//		// 记录最后一层的index，
+//		lastLayerIndex = i
+//	}
+//
+//	// 需要将image信息加入到节点属性中
+//	_, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imageName, accumulateHash))
+//	if err != nil {
+//		Logger.Error(fmt.Sprintf("Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s", err))
+//		fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s\n", err)
+//	}
+//}
+
 // addNewLayerFunc 返回可用于session.ExecuteWrite的func，将Layer节点及节点间的边插入neo4j
-func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer LayerSource) neo4j.ManagedTransactionWork {
+func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Layer) neo4j.ManagedTransactionWork {
 	// 节点的两种label
 	// Layer:
 	// 		id: hash(1-2-5)
@@ -135,10 +178,6 @@ func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Lay
 	// 		digest: layer-ID
 	// 		size: size
 	//		instruction: instruction
-	//		scanned: true/false
-	// 		file_added: []
-	//		file_deleted: []
-	//		vul: [[]]
 
 	// 当前层为镜像的第一层，只需要插入层信息即可
 	if previousHash == "" {
@@ -150,7 +189,7 @@ func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Lay
 					"MERGE (rl:RawLayer {digest: $digest}) "+
 					"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
 					"WITH l,rl "+
-					"MERGE (l)-[:SAME]-(rl)",
+					"MERGE (l)-[:IS_SAME_AS]-(rl)",
 				map[string]any{"idHash": idHash, "digest": layer.Digest, "images": []string{},
 					"size": layer.Size, "instruction": layer.Instruction},
 			)
@@ -171,7 +210,7 @@ func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Lay
 					"MERGE (rl:RawLayer {digest: $digest}) "+
 					"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
 					"WITH l,rl "+
-					"MERGE (l)-[:SAME]-(rl) "+
+					"MERGE (l)-[:IS_SAME_AS]-(rl) "+
 					"WITH l "+
 					"MATCH (previous:Layer {id: $previousHash}) "+
 					"MERGE (previous)-[:IS_BASE_OF]->(l)",
@@ -194,9 +233,10 @@ func addImageToLayerFunc(ctx context.Context, imageName, idHash string) neo4j.Ma
 	return func(tx neo4j.ManagedTransaction) (any, error) {
 		var result, err = tx.Run(ctx,
 			"MATCH (l:Layer {id: $idHash}) "+
-				"WHERE NOT $imageInfo IN l.images "+
-				"SET l.images=l.images+$imageInfo",
-			map[string]any{"idHash": idHash, "imageInfo": imageName},
+				"SET l.images = CASE WHEN NOT $imageName IN l.images THEN l.images + $imageName "+
+				"ELSE l.images "+
+				"END",
+			map[string]any{"idHash": idHash, "imageName": imageName},
 		)
 
 		if err != nil {

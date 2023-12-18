@@ -89,13 +89,17 @@ func jobGeneratorThreshold(threshold int64, tagNum int, page int64, jobCh chan<-
 			}
 
 			// 检查时间顺序，顺序不对从API拿新的repo元数据
-			if len(tagDocs) > 0 && tagDocs[0].LastUpdated.After(repoDoc.LastUpdated) {
-				repo, err := myutils.ReqRepoMetadata(repoDoc.Namespace, repoDoc.Name)
-				if err != nil {
-					myutils.Logger.Error(fmt.Sprintf("request metadata of repository %s/%s from API got error: %s", repoDoc.Namespace, repoDoc.Name, err))
-				} else {
-					if e := myutils.GlobalDBClient.Mongo.UpdateRepository(repo); e != nil {
-						myutils.Logger.Error("update metadata of repo", repo.Namespace, repo.Name, "failed with:", e.Error())
+			if len(tagDocs) > 0 {
+				tagLastUpdatedTime, _ := time.Parse(time.RFC3339Nano, tagDocs[0].LastUpdated)
+				repoLastUpdatedTime, _ := time.Parse(time.RFC3339Nano, repoDoc.LastUpdated)
+				if tagLastUpdatedTime.After(repoLastUpdatedTime) {
+					repo, err := myutils.ReqRepoMetadata(repoDoc.Namespace, repoDoc.Name)
+					if err != nil {
+						myutils.Logger.Error(fmt.Sprintf("request metadata of repository %s/%s from API got error: %s", repoDoc.Namespace, repoDoc.Name, err))
+					} else {
+						if e := myutils.GlobalDBClient.Mongo.UpdateRepository(repo); e != nil {
+							myutils.Logger.Error("update metadata of repo", repo.Namespace, repo.Name, "failed with:", e.Error())
+						}
 					}
 				}
 			}
