@@ -45,6 +45,12 @@ func NewNeo4jDriver(target, username, password string, initFlag bool) (*MyNeo4j,
 		return nil, err
 	}
 
+	// 验证连接
+	err = ret.Driver.VerifyConnectivity(context.TODO())
+	if err != nil {
+		return nil, err
+	}
+
 	// 创建索引，neo4j没有提供判断重复创建索引导致报错的函数，所以不处理err
 	if initFlag {
 		session := ret.Driver.NewSession(context.TODO(), neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
@@ -181,48 +187,87 @@ func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Lay
 
 	// 当前层为镜像的第一层，只需要插入层信息即可
 	if previousHash == "" {
-		return func(tx neo4j.ManagedTransaction) (any, error) {
-			var result, err = tx.Run(ctx,
-				"MERGE (l:Layer {id: $idHash}) "+
-					"ON CREATE SET l.digest=$digest, l.images=$images "+
-					"WITH l "+
-					"MERGE (rl:RawLayer {digest: $digest}) "+
-					"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
-					"WITH l,rl "+
-					"MERGE (l)-[:IS_SAME_AS]-(rl)",
-				map[string]any{"idHash": idHash, "digest": layer.Digest, "images": []string{},
-					"size": layer.Size, "instruction": layer.Instruction},
-			)
+		// 配置命令对应的层不创建RawLayer
+		if layer.Digest == "" {
+			return func(tx neo4j.ManagedTransaction) (any, error) {
+				var result, err = tx.Run(ctx,
+					"MERGE (l:Layer {id: $idHash}) "+
+						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction",
+					map[string]any{"idHash": idHash, "digest": layer.Digest, "images": []string{},
+						"size": layer.Size, "instruction": layer.Instruction},
+				)
 
-			if err != nil {
-				return nil, err
+				if err != nil {
+					return nil, err
+				}
+
+				return result.Consume(ctx)
 			}
+		} else {
+			return func(tx neo4j.ManagedTransaction) (any, error) {
+				var result, err = tx.Run(ctx,
+					"MERGE (l:Layer {id: $idHash}) "+
+						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction "+
+						"WITH l "+
+						"MERGE (rl:RawLayer {digest: $digest}) "+
+						"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
+						"WITH l,rl "+
+						"MERGE (l)-[:IS_SAME_AS]-(rl)",
+					map[string]any{"idHash": idHash, "digest": layer.Digest, "images": []string{},
+						"size": layer.Size, "instruction": layer.Instruction},
+				)
 
-			return result.Consume(ctx)
+				if err != nil {
+					return nil, err
+				}
+
+				return result.Consume(ctx)
+			}
 		}
 	} else {
 		// 当前层非镜像第一层，需要插入层节点、边previous-->current
-		return func(tx neo4j.ManagedTransaction) (any, error) {
-			var result, err = tx.Run(ctx,
-				"MERGE (l:Layer {id: $idHash}) "+
-					"ON CREATE SET l.digest=$digest, l.images=$images "+
-					"WITH l "+
-					"MERGE (rl:RawLayer {digest: $digest}) "+
-					"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
-					"WITH l,rl "+
-					"MERGE (l)-[:IS_SAME_AS]-(rl) "+
-					"WITH l "+
-					"MATCH (previous:Layer {id: $previousHash}) "+
-					"MERGE (previous)-[:IS_BASE_OF]->(l)",
-				map[string]any{"previousHash": previousHash, "idHash": idHash, "digest": layer.Digest, "images": []string{},
-					"size": layer.Size, "instruction": layer.Instruction},
-			)
+		// 配置命令对应的层不创建RawLayer
+		if layer.Digest == "" {
+			return func(tx neo4j.ManagedTransaction) (any, error) {
+				var result, err = tx.Run(ctx,
+					"MERGE (l:Layer {id: $idHash}) "+
+						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction "+
+						"WITH l "+
+						"MATCH (previous:Layer {id: $previousHash}) "+
+						"MERGE (previous)-[:IS_BASE_OF]->(l)",
+					map[string]any{"previousHash": previousHash, "idHash": idHash, "digest": layer.Digest, "images": []string{},
+						"size": layer.Size, "instruction": layer.Instruction},
+				)
 
-			if err != nil {
-				return nil, err
+				if err != nil {
+					return nil, err
+				}
+
+				return result.Consume(ctx)
 			}
+		} else {
+			return func(tx neo4j.ManagedTransaction) (any, error) {
+				var result, err = tx.Run(ctx,
+					"MERGE (l:Layer {id: $idHash}) "+
+						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction "+
+						"WITH l "+
+						"MERGE (rl:RawLayer {digest: $digest}) "+
+						"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
+						"WITH l,rl "+
+						"MERGE (l)-[:IS_SAME_AS]-(rl) "+
+						"WITH l "+
+						"MATCH (previous:Layer {id: $previousHash}) "+
+						"MERGE (previous)-[:IS_BASE_OF]->(l)",
+					map[string]any{"previousHash": previousHash, "idHash": idHash, "digest": layer.Digest, "images": []string{},
+						"size": layer.Size, "instruction": layer.Instruction},
+				)
 
-			return result.Consume(ctx)
+				if err != nil {
+					return nil, err
+				}
+
+				return result.Consume(ctx)
+			}
 		}
 	}
 }

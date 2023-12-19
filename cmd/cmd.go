@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"log"
 	"os"
-	"runtime"
 )
 
 var logLevelStr string
@@ -53,8 +52,14 @@ var RootCmd = &cobra.Command{
 		//		fmt.Println("analyze image", img, "succeeded")
 		//	}
 		//}
-		fmt.Println("env tmp dir:", os.TempDir())
-		fmt.Println("runtime thread:", runtime.NumCPU())
+		mongoMetas, _ := myutils.ReqImagesMetadata("library", "mongo", "latest")
+		for _, mongoMeta := range mongoMetas {
+			myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(fmt.Sprintf("%s/%s/%s:%s@%s", "docker.io", "library", "mongo", "latest", mongoMeta.Digest), mongoMeta)
+		}
+		ubuntuMetas, _ := myutils.ReqImagesMetadata("library", "ubuntu", "22.04")
+		for _, ubuntuMeta := range ubuntuMetas {
+			myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(fmt.Sprintf("%s/%s/%s:%s@%s", "docker.io", "library", "ubuntu", "22.04", ubuntuMeta.Digest), ubuntuMeta)
+		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// 所有命令退出前的清理工作

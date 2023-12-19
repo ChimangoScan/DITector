@@ -1,5 +1,4 @@
 .git/
-.idea/
 go.work
 go.work.sum
 crawler/proxyaddr.json
@@ -11,6 +10,10 @@ test.json
 *.log
 
 pkg/
+
+# jetbrains file
+**/.uuid
+.idea/
 
 # ==========================
 # used for build files
