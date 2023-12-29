@@ -212,6 +212,7 @@ func ReqTagsAllMetadata(repoNamespace, repoName string, page, pageSize int) ([]*
 	res = append(res, pageResult.Results...)
 
 	for pageResult.Next != "" {
+		fmt.Println(pageResult.Next)
 		newResp, err := client.Get(pageResult.Next)
 		if err != nil {
 			Logger.Error("http get", pageResult.Next, "failed with:", err.Error())
@@ -234,6 +235,8 @@ func ReqTagsAllMetadata(repoNamespace, repoName string, page, pageSize int) ([]*
 			break
 		}
 
+		// pageResult必须刷新，不然会死循环
+		pageResult = new(TagsPage)
 		err = json.Unmarshal(tmpBuf.Bytes(), pageResult)
 		if err != nil {
 			Logger.Error("json unmarshal contents from resp of", pageResult.Next, "failed with:", err.Error())

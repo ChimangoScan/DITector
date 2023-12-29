@@ -72,20 +72,20 @@ var RootCmd = &cobra.Command{
 		// }
 		// wg.Wait()
 		// print("Done")
-		tagMetas, err := myutils.ReqTagsMetadata("ustclug", "debian", 1, 20)
+		_, err := myutils.ReqTagsAllMetadata("verdaccio", "verdaccio", 1, 100)
 		if err != nil {
 			log.Fatalln("tags got error", err)
 		}
-		for _, tagMeta := range tagMetas {
-			fmt.Println(tagMeta.Name)
-		}
-		imgMetas, err := myutils.ReqImagesMetadata("ustclug", "centos", "7.2.1511")
-		if err != nil {
-			log.Fatalln("got error:", err)
-		}
-		for _, imgMeta := range imgMetas {
-			fmt.Println(imgMeta.Digest)
-		}
+		// for _, tagMeta := range tagMetas {
+		// 	fmt.Println(tagMeta.Name)
+		// }
+		// imgMetas, err := myutils.ReqImagesMetadata("ustclug", "centos", "7.2.1511")
+		// if err != nil {
+		// 	log.Fatalln("got error:", err)
+		// }
+		// for _, imgMeta := range imgMetas {
+		// 	fmt.Println(imgMeta.Digest)
+		// }
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// 所有命令退出前的清理工作
