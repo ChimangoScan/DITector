@@ -71,7 +71,8 @@ var RootCmd = &cobra.Command{
 				}(ubuntuMeta.Digest, ubuntuMeta)
 			}
 		}
-
+		wg.Wait()
+		print("Done")
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// 所有命令退出前的清理工作
