@@ -2,11 +2,12 @@ package buildgraph
 
 import (
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
 	"log"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/Musso12138/docker-scan/myutils"
 )
 
 type GraphJob struct {
@@ -75,8 +76,8 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 				var tagDocs []*myutils.Tag
 				tagFromAPIFlag := false
 
-				// 下载量大的镜像/library镜像全量交给API获取
-				if repoDoc.PullCount > pullCountThreshold || repoDoc.Namespace == "library" {
+				// library镜像交给API全量获取
+				if repoDoc.Namespace == "library" {
 					//if repoDoc.PullCount > 100000 && tagPage == 1 {
 					tagDocs, err = myutils.ReqTagsAllMetadata(repoDoc.Namespace, repoDoc.Name, 1, 100)
 					if err != nil {
@@ -87,16 +88,26 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 					tagFromAPIFlag = true
 					//// 如果拿满100条，那么已拿到第10页
 					//tagPage = 10
+				} else if repoDoc.PullCount > pullCountThreshold {
+					// 下载量大的镜像交给API获取前100个tag
+					tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, 100)
+					if err != nil {
+						myutils.Logger.Error(fmt.Sprintf("request tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
+							repoDoc.Namespace, repoDoc.Name, 1, 100, err))
+						break
+					}
+					tagFromAPIFlag = true
 				} else {
-					// 其他镜像从mongodb获取
+					// 其他镜像先尝试从mongodb获取pageSize个
 					tagDocs, err = myutils.GlobalDBClient.Mongo.FindTagsByRepoNamePaged(repoDoc.Namespace, repoDoc.Name, tagPage, int64(pageSize))
 					if err != nil {
 						myutils.Logger.Error(fmt.Sprintf("find tags for repository %s/%s in MongoDB page: %d, pagesize: %d, got error: %s", repoDoc.Namespace, repoDoc.Name, tagPage, pageSize, err))
 						break
 					}
 
+					// mongodb没有tag记录，从API获取pageSize个
 					if len(tagDocs) == 0 {
-						// 还是第一页，说明数据库里没记录到tag，从API拿pageSize个
+						// 还是第一页，说明数据库里没记录到相关tag，从API拿pageSize个
 						if tagPage == 1 {
 							tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, pageSize)
 							if err != nil {
