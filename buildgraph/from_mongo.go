@@ -54,7 +54,8 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 	var repoPageSize int64 = 5
 	for {
 		// 先改成只插入library的
-		repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(map[string]any{"namespace": "library"}, repoPage, repoPageSize)
+		// repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(map[string]any{"namespace": "library"}, repoPage, repoPageSize)
+		repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(nil, repoPage, repoPageSize)
 		if err != nil {
 			myutils.Logger.Error(fmt.Sprintf("find repository in MongoDB page: %d, pagesize: %d, got error: %s", repoPage, repoPageSize, err))
 			continue
@@ -73,171 +74,174 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 			// 修改：仅对library和下载量>1000000的repo的全部tag进行构建，其他的仓库只构建前20tag
 			// 修改：过滤掉windows系统的镜像
 			var tagPage int64 = 1
-			for {
-				var tagDocs []*myutils.Tag
-				tagFromAPIFlag := false
+			// for {
+			var tagDocs []*myutils.Tag
+			tagFromAPIFlag := false
 
-				// library镜像交给API全量获取
-				if repoDoc.Namespace == "library" {
-					//if repoDoc.PullCount > 100000 && tagPage == 1 {
-					tagDocs, err = myutils.ReqTagsAllMetadata(repoDoc.Namespace, repoDoc.Name, 1, 100)
-					if err != nil {
-						myutils.Logger.Error(fmt.Sprintf("request all tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
-							repoDoc.Namespace, repoDoc.Name, 1, 100, err))
-						break
-					}
-					tagFromAPIFlag = true
-					//// 如果拿满100条，那么已拿到第10页
-					//tagPage = 10
-				} else if repoDoc.PullCount > pullCountThreshold {
-					// 下载量大的镜像交给API获取前100个tag
-					tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, 100)
-					if err != nil {
-						myutils.Logger.Error(fmt.Sprintf("request tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
-							repoDoc.Namespace, repoDoc.Name, 1, 100, err))
-						break
-					}
-					tagFromAPIFlag = true
-				} else {
-					// 其他镜像先尝试从mongodb获取pageSize个
-					tagDocs, err = myutils.GlobalDBClient.Mongo.FindTagsByRepoNamePaged(repoDoc.Namespace, repoDoc.Name, tagPage, int64(pageSize))
-					if err != nil {
-						myutils.Logger.Error(fmt.Sprintf("find tags for repository %s/%s in MongoDB page: %d, pagesize: %d, got error: %s", repoDoc.Namespace, repoDoc.Name, tagPage, pageSize, err))
-						break
-					}
+			// library镜像交给API全量获取
+			if repoDoc.Namespace == "library" {
+				// library的部分已经全部插入了，后面直接跳过即可
+				continue
 
-					// mongodb没有tag记录，从API获取pageSize个
-					if len(tagDocs) == 0 {
-						// 还是第一页，说明数据库里没记录到相关tag，从API拿pageSize个
-						if tagPage == 1 {
-							tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, pageSize)
-							if err != nil {
-								myutils.Logger.Error(fmt.Sprintf("request tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
-									repoDoc.Namespace, repoDoc.Name, 1, pageSize, err))
-								break
-							}
-							tagFromAPIFlag = true
-						} else {
-							// 不是第一页，已遍历全部tag，退出当前repo
+				//if repoDoc.PullCount > 100000 && tagPage == 1 {
+				tagDocs, err = myutils.ReqTagsAllMetadata(repoDoc.Namespace, repoDoc.Name, 1, 100)
+				if err != nil {
+					myutils.Logger.Error(fmt.Sprintf("request all tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
+						repoDoc.Namespace, repoDoc.Name, 1, 100, err))
+					break
+				}
+				tagFromAPIFlag = true
+				//// 如果拿满100条，那么已拿到第10页
+				//tagPage = 10
+			} else if repoDoc.PullCount > pullCountThreshold {
+				// 下载量大的镜像交给API获取前100个tag
+				tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, 100)
+				if err != nil {
+					myutils.Logger.Error(fmt.Sprintf("request tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
+						repoDoc.Namespace, repoDoc.Name, 1, 100, err))
+					break
+				}
+				tagFromAPIFlag = true
+			} else {
+				// 其他镜像先尝试从mongodb获取pageSize个
+				tagDocs, err = myutils.GlobalDBClient.Mongo.FindTagsByRepoNamePaged(repoDoc.Namespace, repoDoc.Name, tagPage, int64(pageSize))
+				if err != nil {
+					myutils.Logger.Error(fmt.Sprintf("find tags for repository %s/%s in MongoDB page: %d, pagesize: %d, got error: %s", repoDoc.Namespace, repoDoc.Name, tagPage, pageSize, err))
+					break
+				}
+
+				// mongodb没有tag记录，从API获取pageSize个
+				if len(tagDocs) == 0 {
+					// 还是第一页，说明数据库里没记录到相关tag，从API拿pageSize个
+					if tagPage == 1 {
+						tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, pageSize)
+						if err != nil {
+							myutils.Logger.Error(fmt.Sprintf("request tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
+								repoDoc.Namespace, repoDoc.Name, 1, pageSize, err))
 							break
 						}
+						tagFromAPIFlag = true
+					} else {
+						// 不是第一页，已遍历全部tag，退出当前repo
+						break
 					}
 				}
-
-				// 从API获取的结果，向数据库中备份一下
-				if tagFromAPIFlag {
-					for _, tagDoc := range tagDocs {
-						wg.Add(1)
-						go func(tagMetadata *myutils.Tag) {
-							defer wg.Done()
-							if e := myutils.GlobalDBClient.Mongo.UpdateTag(tagMetadata); e != nil {
-								myutils.Logger.Error("update metadata of tag", tagMetadata.RepositoryNamespace, tagMetadata.RepositoryName, tagMetadata.Name, "failed with:", e.Error())
-							}
-						}(tagDoc)
-					}
-				}
-
-				// 遍历repo的每个tag
-				for _, tagDoc := range tagDocs {
-					tagNeedUpdateFlag := false
-					tagLastPushedTime, _ := time.Parse(time.RFC3339Nano, tagDoc.TagLastPushed)
-
-					// 遍历tag的每个image信息
-					for _, imgOfTag := range tagDoc.Images {
-						// 跳过windows镜像，以及其他unknown镜像
-						if imgOfTag.OS == "windows" || (imgOfTag.Architecture == "unknown" && imgOfTag.OS == "unknown") {
-							continue
-						}
-
-						imgDigest := imgOfTag.Digest
-						// 尝试从数据库拿image元数据
-						imgMeta, err := myutils.GlobalDBClient.Mongo.FindImageByDigest(imgDigest)
-						// 数据库中没有，从API获取
-						if err != nil {
-							imgAPIMetas, e := myutils.ReqImagesMetadata(repoDoc.Namespace, repoDoc.Name, tagDoc.Name)
-							if e != nil {
-								myutils.Logger.Error(fmt.Sprintf("get images metadata of tag %s/%s:%s from API failed with: %s", repoDoc.Namespace, repoDoc.Name, tagDoc.Name, e))
-								continue
-							} else {
-								// 从API获取image元数据成功
-								for _, imgAPIMeta := range imgAPIMetas {
-									// 检查tag数据是否需要更新
-									// 存在至少一个image上传时间比tag上传时间靠后，tag元数据需要更新
-									imgLastPushedTime, _ := time.Parse(time.RFC3339Nano, imgAPIMeta.LastPushed)
-									if imgLastPushedTime.After(tagLastPushedTime) {
-										tagNeedUpdateFlag = true
-									}
-
-									// 将新获取的image元数据存入数据库
-									wg.Add(1)
-									go func(imgMeta *myutils.Image) {
-										defer wg.Done()
-										if e := myutils.GlobalDBClient.Mongo.UpdateImage(imgMeta); e != nil {
-											myutils.Logger.Error("update metadata of image", imgMeta.Digest, "failed with:", e.Error())
-										}
-									}(imgAPIMeta)
-								}
-
-								// 存在image比tag推送晚，从API重新获取tag信息并存入数据库
-								if tagNeedUpdateFlag {
-									tagAPIDoc, err := myutils.ReqTagMetadata(repoDoc.Namespace, repoDoc.Name, tagDoc.Name)
-									if err != nil {
-										myutils.Logger.Error(fmt.Sprintf("get tag metadata of tag %s/%s:%s from API failed with: %s", repoDoc.Namespace, repoDoc.Name, tagDoc.Name, err))
-										break
-									}
-									// 获取成功后将要生产任务的tag信息刷新
-									tagDoc = tagAPIDoc
-									// 从API获取的tag元数据重新存入数据库
-									wg.Add(1)
-									go func(tagMeta *myutils.Tag) {
-										defer wg.Done()
-										if e := myutils.GlobalDBClient.Mongo.UpdateTag(tagMeta); e != nil {
-											myutils.Logger.Error("update metadata of tag", tagMeta.RepositoryNamespace, tagMeta.RepositoryName, tagMeta.Name, "failed with:", e.Error())
-										}
-									}(tagDoc)
-								}
-
-								// tag已经是最新，image完全从API获取，遍历API获取的image元数据生产任务
-								for _, imgAPIMeta := range imgAPIMetas {
-									// 跳过windows镜像，以及其他unknown镜像
-									if imgAPIMeta.OS == "windows" || (imgAPIMeta.Architecture == "unknown" && imgAPIMeta.OS == "unknown") {
-										continue
-									}
-
-									ch <- GraphJob{
-										Registry:      "docker.io",
-										RepoNamespace: repoDoc.Namespace,
-										RepoName:      repoDoc.Name,
-										TagName:       tagDoc.Name,
-										ImageMeta:     imgAPIMeta,
-									}
-								}
-								// 结束后结束本轮image循环
-								break
-							}
-						} else {
-							// 数据库中有，生成对应的任务
-							ch <- GraphJob{
-								Registry:      "docker.io",
-								RepoNamespace: repoDoc.Namespace,
-								RepoName:      repoDoc.Name,
-								TagName:       tagDoc.Name,
-								ImageMeta:     imgMeta,
-							}
-						}
-					}
-				}
-
-				break
-
-				//// 从API获取tag列表且没拿满100个，直接退出当前repo
-				//if tagFromAPIFlag && len(tagDocs) < 100 {
-				//	break
-				//}
-				//
-				//// tag翻页
-				//tagPage++
 			}
+
+			// 从API获取的结果，向数据库中备份一下
+			if tagFromAPIFlag {
+				for _, tagDoc := range tagDocs {
+					wg.Add(1)
+					go func(tagMetadata *myutils.Tag) {
+						defer wg.Done()
+						if e := myutils.GlobalDBClient.Mongo.UpdateTag(tagMetadata); e != nil {
+							myutils.Logger.Error("update metadata of tag", tagMetadata.RepositoryNamespace, tagMetadata.RepositoryName, tagMetadata.Name, "failed with:", e.Error())
+						}
+					}(tagDoc)
+				}
+			}
+
+			// 遍历repo的每个tag
+			for _, tagDoc := range tagDocs {
+				tagNeedUpdateFlag := false
+				tagLastPushedTime, _ := time.Parse(time.RFC3339Nano, tagDoc.TagLastPushed)
+
+				// 遍历tag的每个image信息
+				for _, imgOfTag := range tagDoc.Images {
+					// 跳过windows镜像，以及其他unknown镜像
+					if imgOfTag.OS == "windows" || (imgOfTag.Architecture == "unknown" && imgOfTag.OS == "unknown") {
+						continue
+					}
+
+					imgDigest := imgOfTag.Digest
+					// 尝试从数据库拿image元数据
+					imgMeta, err := myutils.GlobalDBClient.Mongo.FindImageByDigest(imgDigest)
+					// 数据库中没有，从API获取
+					if err != nil {
+						imgAPIMetas, e := myutils.ReqImagesMetadata(repoDoc.Namespace, repoDoc.Name, tagDoc.Name)
+						if e != nil {
+							myutils.Logger.Error(fmt.Sprintf("get images metadata of tag %s/%s:%s from API failed with: %s", repoDoc.Namespace, repoDoc.Name, tagDoc.Name, e))
+							continue
+						} else {
+							// 从API获取image元数据成功
+							for _, imgAPIMeta := range imgAPIMetas {
+								// 检查tag数据是否需要更新
+								// 存在至少一个image上传时间比tag上传时间靠后，tag元数据需要更新
+								imgLastPushedTime, _ := time.Parse(time.RFC3339Nano, imgAPIMeta.LastPushed)
+								if imgLastPushedTime.After(tagLastPushedTime) {
+									tagNeedUpdateFlag = true
+								}
+
+								// 将新获取的image元数据存入数据库
+								wg.Add(1)
+								go func(imgMeta *myutils.Image) {
+									defer wg.Done()
+									if e := myutils.GlobalDBClient.Mongo.UpdateImage(imgMeta); e != nil {
+										myutils.Logger.Error("update metadata of image", imgMeta.Digest, "failed with:", e.Error())
+									}
+								}(imgAPIMeta)
+							}
+
+							// 存在image比tag推送晚，从API重新获取tag信息并存入数据库
+							if tagNeedUpdateFlag {
+								tagAPIDoc, err := myutils.ReqTagMetadata(repoDoc.Namespace, repoDoc.Name, tagDoc.Name)
+								if err != nil {
+									myutils.Logger.Error(fmt.Sprintf("get tag metadata of tag %s/%s:%s from API failed with: %s", repoDoc.Namespace, repoDoc.Name, tagDoc.Name, err))
+									break
+								}
+								// 获取成功后将要生产任务的tag信息刷新
+								tagDoc = tagAPIDoc
+								// 从API获取的tag元数据重新存入数据库
+								wg.Add(1)
+								go func(tagMeta *myutils.Tag) {
+									defer wg.Done()
+									if e := myutils.GlobalDBClient.Mongo.UpdateTag(tagMeta); e != nil {
+										myutils.Logger.Error("update metadata of tag", tagMeta.RepositoryNamespace, tagMeta.RepositoryName, tagMeta.Name, "failed with:", e.Error())
+									}
+								}(tagDoc)
+							}
+
+							// tag已经是最新，image完全从API获取，遍历API获取的image元数据生产任务
+							for _, imgAPIMeta := range imgAPIMetas {
+								// 跳过windows镜像，以及其他unknown镜像
+								if imgAPIMeta.OS == "windows" || (imgAPIMeta.Architecture == "unknown" && imgAPIMeta.OS == "unknown") {
+									continue
+								}
+
+								ch <- GraphJob{
+									Registry:      "docker.io",
+									RepoNamespace: repoDoc.Namespace,
+									RepoName:      repoDoc.Name,
+									TagName:       tagDoc.Name,
+									ImageMeta:     imgAPIMeta,
+								}
+							}
+							// 结束后结束本轮image循环
+							break
+						}
+					} else {
+						// 数据库中有，生成对应的任务
+						ch <- GraphJob{
+							Registry:      "docker.io",
+							RepoNamespace: repoDoc.Namespace,
+							RepoName:      repoDoc.Name,
+							TagName:       tagDoc.Name,
+							ImageMeta:     imgMeta,
+						}
+					}
+				}
+			}
+
+			break
+
+			//// 从API获取tag列表且没拿满100个，直接退出当前repo
+			//if tagFromAPIFlag && len(tagDocs) < 100 {
+			//	break
+			//}
+			//
+			//// tag翻页
+			//tagPage++
+			// }
 
 		}
 

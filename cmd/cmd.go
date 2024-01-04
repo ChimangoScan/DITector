@@ -44,49 +44,27 @@ var RootCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// 仅用作测试
-		//imgList := [...]string{"harbur/kubebot:latest", "cfinfrastructure/terraform:latest", "baiyuetribe/onekey:vipvideo"}
-		//for _, img := range imgList {
-		//	_, err := analyzer.AnalyzeImageByName(img, true)
-		//	if err != nil {
-		//		fmt.Println("analyze image", img, "failed with:", err)
-		//	} else {
-		//		fmt.Println("analyze image", img, "succeeded")
-		//	}
-		//}
-		//mongoMetas, _ := myutils.ReqImagesMetadata("library", "mongo", "latest")
-		//for _, mongoMeta := range mongoMetas {
-		//	myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(fmt.Sprintf("%s/%s/%s:%s@%s", "docker.io", "library", "mongo", "latest", mongoMeta.Digest), mongoMeta)
-		//}
-		// ubuntuMetas, _ := myutils.ReqImagesMetadata("library", "ubuntu", "22.04")
-		// //for _, ubuntuMeta := range ubuntuMetas {
-		// //	myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(fmt.Sprintf("%s/%s/%s:%s@%s", "docker.io", "library", "ubuntu", "22.04", ubuntuMeta.Digest), ubuntuMeta)
-		// //}
-		// wg := sync.WaitGroup{}
-		// for i := 0; i < 10; i++ {
-		// 	for _, ubuntuMeta := range ubuntuMetas {
-		// 		wg.Add(1)
-		// 		go func(digest string, img *myutils.Image) {
-		// 			defer wg.Done()
-		// 			myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(fmt.Sprintf("%s/%s/%s:%s@%s", "docker.io", "library", "ubuntu", "22.04", digest), img)
-		// 		}(ubuntuMeta.Digest, ubuntuMeta)
-		// 	}
-		// }
-		// wg.Wait()
-		// print("Done")
-		// _, err := myutils.ReqTagsAllMetadata("verdaccio", "verdaccio", 1, 100)
-		// if err != nil {
-		// 	log.Fatalln("tags got error", err)
-		// }
-		// for _, tagMeta := range tagMetas {
-		// 	fmt.Println(tagMeta.Name)
-		// }
-		// imgMetas, err := myutils.ReqImagesMetadata("ustclug", "centos", "7.2.1511")
-		// if err != nil {
-		// 	log.Fatalln("got error:", err)
-		// }
-		// for _, imgMeta := range imgMetas {
-		// 	fmt.Println(imgMeta.Digest)
-		// }
+		// repo能否正常加载
+		repo, err := myutils.GlobalDBClient.Mongo.FindRepositoryByName("library", "bash")
+		if err != nil {
+			fmt.Println("get repos failed with:", err)
+		} else {
+			fmt.Println("get repo:", repo.Namespace, repo.Name, repo.DateRegistered, repo.LastUpdated)
+		}
+
+		tag, err := myutils.GlobalDBClient.Mongo.FindTagByName("library", "adminer", "latest")
+		if err != nil {
+			fmt.Println("get tag failed with:", err)
+		} else {
+			fmt.Println("get tag:", tag.RepositoryNamespace, tag.RepositoryName, tag.Name, tag.LastUpdated, tag.Images[0].LastPushed)
+		}
+
+		img, err := myutils.GlobalDBClient.Mongo.FindImageByDigest("sha256:6f59f993ee9f20093ab140a805dc67152889cfd1272916262b3a4de8727e7ddc")
+		if err != nil {
+			fmt.Println("get image failed with:", err)
+		} else {
+			fmt.Println("get image:", img.Digest, img.LastPushed)
+		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// 所有命令退出前的清理工作
