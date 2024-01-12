@@ -3,11 +3,12 @@ package analyzer
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/Musso12138/docker-scan/myutils"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
-	"os"
-	"time"
 )
 
 var DefaultAnalyzer *ImageAnalyzer
@@ -170,7 +171,7 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 				imgRes.TagName = ci.tagName
 				imgRes.Architecture = ci.architecture
 				imgRes.Variant = ci.variant
-				imgRes.OS = ci.osVersion
+				imgRes.OS = ci.os
 				imgRes.OSVersion = ci.osVersion
 
 				imgRes.TotalTime = time.Since(beginTime).String()
