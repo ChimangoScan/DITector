@@ -3,10 +3,12 @@ package analyzer
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
 	"os"
 	"path"
 	"strings"
+
+	"github.com/Musso12138/docker-scan/analyzer/extractor"
+	"github.com/Musso12138/docker-scan/myutils"
 )
 
 func (analyzer *ImageAnalyzer) analyzeMetadata(ci *CurrentImage) (*myutils.MetadataResult, error) {
@@ -23,6 +25,7 @@ func (analyzer *ImageAnalyzer) analyzeMetadata(ci *CurrentImage) (*myutils.Metad
 		return nil, err
 	}
 	res.SecretLeakages = imgMetaRes.SecretLeakages
+	res.InstalledContents = imgMetaRes.InstalledContents
 
 	return res, nil
 }
@@ -47,6 +50,7 @@ func (analyzer *ImageAnalyzer) analyzeRepoMetadata(ci *CurrentImage) (*myutils.M
 func (analyzer *ImageAnalyzer) analyzeImageMetadata(ci *CurrentImage) (*myutils.MetadataResult, error) {
 	res := myutils.NewMetadataResult()
 
+	// 扫描隐私泄露
 	// 将image元数据中的layer信息写入临时文件
 	metaFilepath := path.Join(myutils.GlobalConfig.TmpDir, fmt.Sprintf("%s-%s-%s-meta.json", ci.namespace, ci.repoName, ci.tagName))
 	layerData, err := json.MarshalIndent(ci.metadata.imageMetadata.Layers, "", "    ")
@@ -61,7 +65,7 @@ func (analyzer *ImageAnalyzer) analyzeImageMetadata(ci *CurrentImage) (*myutils.
 	}
 	defer os.Remove(metaFilepath)
 
-	// 调用trufflehog扫描临时文件
+	// 调用trufflehog扫描layer信息临时文件中包含的敏感数据
 	secrets, err := scanSecretsInFilepath(metaFilepath)
 	if err != nil {
 		myutils.Logger.Error("scanSecretsInFilepath", metaFilepath, "failed with:", err.Error())
@@ -80,7 +84,88 @@ func (analyzer *ImageAnalyzer) analyzeImageMetadata(ci *CurrentImage) (*myutils.
 
 	res.SecretLeakages = secrets
 
+	// 扫描内容下载
+	installedContents := make([]*myutils.InstalledContent, 0)
+	for _, layer := range ci.metadata.imageMetadata.Layers {
+		installs := extractInstalledContentsFromInstruction(layer.Instruction, layer.Digest)
+		installedContents = append(installedContents, installs...)
+	}
+	res.InstalledContents = installedContents
+
 	return res, nil
+}
+
+// extractInstalledContentsFromInstruction 从命令字符串中提取出安装内容，包括pip install, npm install, wget, ADD
+func extractInstalledContentsFromInstruction(instruction string, digest string) []*myutils.InstalledContent {
+	res := make([]*myutils.InstalledContent, 0)
+
+	// pip install
+	if extractor.CheckPipInstallCmd(instruction) {
+		for _, cmd := range extractor.ExtractPipInstallCmdsFromString(instruction) {
+			pipArgs := extractor.ParsePipInstallCmdArgs(cmd)
+			pkgsMap := pipArgs["name"].(map[string][]string)
+			for name, vers := range pkgsMap {
+				res = append(res, &myutils.InstalledContent{
+					Source:        "pip install",
+					Command:       cmd,
+					Name:          name,
+					VersionLimits: vers,
+					Instruction:   instruction,
+					LayerDigest:   digest,
+				})
+			}
+		}
+	}
+
+	// npm install
+	if extractor.CheckNpmInstallCmd(instruction) {
+		for _, cmd := range extractor.ExtractNpmInstallCmdsFromString(instruction) {
+			npmArgs := extractor.ParseNpmInstallCmdArgs(cmd)
+			pkgsMap := npmArgs["name"].(map[string][]string)
+			for name, vers := range pkgsMap {
+				res = append(res, &myutils.InstalledContent{
+					Source:        "npm install",
+					Command:       cmd,
+					Name:          name,
+					VersionLimits: vers,
+					Instruction:   instruction,
+					LayerDigest:   digest,
+				})
+			}
+		}
+	}
+
+	// wget
+	if extractor.CheckWgetCmd(instruction) {
+		for _, cmd := range extractor.ExtractWgetCmds(instruction) {
+			for _, u := range extractor.ExtractWgetCmdURLs(cmd) {
+				res = append(res, &myutils.InstalledContent{
+					Source:        "wget",
+					Command:       cmd,
+					Name:          u,
+					VersionLimits: []string{},
+					Instruction:   instruction,
+					LayerDigest:   digest,
+				})
+			}
+		}
+	}
+
+	// Dockerfile ADD
+	if extractor.CheckAddFromURL(instruction) {
+		for _, u := range extractor.ExtractAddURLs(instruction) {
+			res = append(res, &myutils.InstalledContent{
+				Source:        "ADD",
+				Command:       instruction,
+				Name:          u,
+				VersionLimits: []string{},
+				Instruction:   instruction,
+				LayerDigest:   digest,
+			})
+		}
+	}
+
+	return res
 }
 
 //func (analyzer *ImageAnalyzer) analyzeImageMetadata(ci *CurrentImage) (*myutils.MetadataResult, error) {

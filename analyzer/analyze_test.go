@@ -6,8 +6,17 @@ import (
 	"testing"
 )
 
-func TestNewImageAnalyzerGlobalConfig(t *testing.T) {
-
+func TestExtractInstalledContentsFromInstruction(t *testing.T) {
+	instruction := `
+	RUN pip install --no-cache-dir pymongo numpy>2.0, <3.1,==3.0 json
+	RUN npm install sax@0.1.1 githubname/reponame @myorg/privatepackage
+	RUN apt-get install -y wget && wget -O myfile.txt https://example.com/myfile.txt && ln -sf myfile.txt /exe
+	ADD --checksum=sha256:24454f830cdb571e2c4ad15481119c43b3cafd48dd869a9b2945d1036d1dc68d https://mirrors.edge.kernel.org/pub/linux/kernel/Historic/linux-0.01.tar.gz /
+	`
+	digest := `testdigest111`
+	for _, i := range extractInstalledContentsFromInstruction(instruction, digest) {
+		fmt.Println(*i)
+	}
 }
 
 func TestAnalyzeImageMetadata(t *testing.T) {

@@ -34,8 +34,9 @@ type ImageResult struct {
 }
 
 type MetadataResult struct {
-	SecretLeakages  []*SecretLeakage  `json:"secret_leakages" bson:"secret_leakages"`
-	SensitiveParams []*SensitiveParam `json:"sensitive_params" bson:"sensitive_params"`
+	SecretLeakages    []*SecretLeakage    `json:"secret_leakages" bson:"secret_leakages"`
+	SensitiveParams   []*SensitiveParam   `json:"sensitive_params" bson:"sensitive_params"`
+	InstalledContents []*InstalledContent `json:"installed_contents" bson:"installed_contents"`
 }
 
 type ConfigurationResult struct {
@@ -74,6 +75,19 @@ type LayerResult struct {
 	TaskID string
 }
 
+// InstalledContent 记录layer instruction中通过pip install, npm install, wget下载的内容
+type InstalledContent struct {
+	Source        string   `json:"source" bson:"source"`   // 内容来源，pip, npm, wget, add
+	Command       string   `json:"command" bson:"command"` // 安装命令，pip install, npm install, wget, add
+	Name          string   `json:"name" bson:"name"`
+	VersionLimits []string `json:"version_limits" bson:"version_limits"`
+	Instruction   string   `json:"instruction" bson:"instruction"` // layer instruction
+	LayerDigest   string   `json:"layer_digest" bson:"layer_digest"`
+	Description   string   `json:"description" bson:"description"`
+	Severity      string   `json:"severity" bson:"severity"`
+	SeverityScore float64  `json:"severity_score" bson:"severity_score"`
+}
+
 type Component struct {
 	Filename    string `json:"filename" bson:"filename"`
 	Codetype    string `json:"codetype" bson:"codetype"`
@@ -102,6 +116,7 @@ func NewMetadataResult() *MetadataResult {
 
 	res.SecretLeakages = make([]*SecretLeakage, 0)
 	res.SensitiveParams = make([]*SensitiveParam, 0)
+	res.InstalledContents = make([]*InstalledContent, 0)
 
 	return res
 }
