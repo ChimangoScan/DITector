@@ -17,7 +17,7 @@ var logLevelStr string
 var validLogLevel = map[string]int{"debug": 1, "info": 2, "warn": 3, "error": 4, "critical": 5}
 
 const longDesc = `
-_____             _             _____                 
+ _____             _             _____                 
 |  __ \           | |           / ____|                
 | |  | | ___   ___| | _____ _ _| (___   ___ __ _ _ __  
 | |  | |/ _ \ / __| |/ / _ \ '__\___ \ / __/ _ | '_ \ 
@@ -45,25 +45,14 @@ var RootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// 仅用作测试
 		// repo能否正常加载
-		repo, err := myutils.GlobalDBClient.Mongo.FindRepositoryByName("library", "bash")
-		if err != nil {
-			fmt.Println("get repos failed with:", err)
-		} else {
-			fmt.Println("get repo:", repo.Namespace, repo.Name, repo.DateRegistered, repo.LastUpdated)
-		}
-
-		tag, err := myutils.GlobalDBClient.Mongo.FindTagByName("library", "adminer", "latest")
-		if err != nil {
-			fmt.Println("get tag failed with:", err)
-		} else {
-			fmt.Println("get tag:", tag.RepositoryNamespace, tag.RepositoryName, tag.Name, tag.LastUpdated, tag.Images[0].LastPushed)
-		}
-
-		img, err := myutils.GlobalDBClient.Mongo.FindImageByDigest("sha256:6f59f993ee9f20093ab140a805dc67152889cfd1272916262b3a4de8727e7ddc")
-		if err != nil {
-			fmt.Println("get image failed with:", err)
-		} else {
-			fmt.Println("get image:", img.Digest, img.LastPushed)
+		for i := 0; i < 100; i++ {
+			tags, err := myutils.ReqTagsMetadata("amazeeiolagoon", "pr-595-node", 1, 20)
+			if err != nil {
+				log.Fatalln(err)
+			}
+			for _, tag := range tags {
+				fmt.Println(tag.Name)
+			}
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

@@ -19,8 +19,8 @@ var repoNameWithManyTagsFile, _ = NewRepoNameRecordFile("/data/docker-proj/logs/
 // 是否能够修复socket: open too many files？？？？？？
 var httpClient = &http.Client{
 	Transport: &http.Transport{
-		// DisableKeepAlives: true,
-		Proxy: http.ProxyFromEnvironment,
+		DisableKeepAlives: true, // 疑似可以解决resp 0 tag问题，需要后续观察
+		Proxy:             http.ProxyFromEnvironment,
 	},
 }
 
@@ -51,13 +51,13 @@ func ReqRepoMetadata(namespace, name string) (*Repository, error) {
 	}
 	defer resp.Body.Close()
 
+	// 检查http响应状态
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request %s got unexpected resp status code: %d", url, resp.StatusCode)
+	}
+
 	limitStr := resp.Header.Get("X-Ratelimit-Remaining")
 	Logger.Debug("get repo metadata from API:", url, ", remained limit:", limitStr)
-	if limit, e := strconv.Atoi(limitStr); e == nil {
-		if limit <= 20 {
-			time.Sleep(20 * time.Second)
-		}
-	}
 
 	repoBuf := bytes.Buffer{}
 	_, err = io.Copy(&repoBuf, resp.Body)
@@ -75,6 +75,13 @@ func ReqRepoMetadata(namespace, name string) (*Repository, error) {
 		return nil, fmt.Errorf("docker hub resp 404 to repo %s/%s", namespace, name)
 	}
 
+	// 根据limit控制返回节奏
+	if limit, e := strconv.Atoi(limitStr); e == nil {
+		if limit <= 20 {
+			time.Sleep(20 * time.Second)
+		}
+	}
+
 	return rMeta, nil
 }
 
@@ -90,13 +97,14 @@ func ReqTagMetadata(repoNamespace, repoName, name string) (*Tag, error) {
 	}
 	defer resp.Body.Close()
 
+	// 检查http响应状态
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request %s got unexpected resp status code: %d", url, resp.StatusCode)
+	}
+
+	// 对正常API报resp 0 tag错误的时候limitStr是空！！？？
 	limitStr := resp.Header.Get("X-Ratelimit-Remaining")
 	Logger.Debug("get tag metadata from API:", url, ", remained limit:", limitStr)
-	if limit, e := strconv.Atoi(limitStr); e == nil {
-		if limit <= 20 {
-			time.Sleep(20 * time.Second)
-		}
-	}
 
 	var tagBuf bytes.Buffer
 	_, err = io.Copy(&tagBuf, resp.Body)
@@ -117,6 +125,13 @@ func ReqTagMetadata(repoNamespace, repoName, name string) (*Tag, error) {
 	tMeta.RepositoryNamespace = repoNamespace
 	tMeta.RepositoryName = repoName
 
+	// 利用limit控制返回节奏
+	if limit, e := strconv.Atoi(limitStr); e == nil {
+		if limit <= 20 {
+			time.Sleep(20 * time.Second)
+		}
+	}
+
 	return tMeta, err
 }
 
@@ -133,12 +148,15 @@ func ReqTagsMetadata(repoNamespace, repoName string, page, pageSize int) ([]*Tag
 	}
 	defer resp.Body.Close()
 
+	// 检查http响应状态
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request %s got unexpected resp status code: %d", url, resp.StatusCode)
+	}
+
 	limitStr := resp.Header.Get("X-Ratelimit-Remaining")
 	Logger.Debug("get tags metadata from API:", url, ", remained limit:", limitStr)
-	if limit, e := strconv.Atoi(limitStr); e == nil {
-		if limit <= 20 {
-			time.Sleep(20 * time.Second)
-		}
+	if limitStr == "" {
+		return nil, fmt.Errorf("request API: %s got empty X-Ratelimit-Remaining", limitStr)
 	}
 
 	// body, err := io.ReadAll(resp.Body)
@@ -153,8 +171,8 @@ func ReqTagsMetadata(repoNamespace, repoName string, page, pageSize int) ([]*Tag
 		return nil, err
 	}
 
-	// 处理404
 	if pageResult.Count == 0 && len(pageResult.Results) == 0 {
+		// TODO: 频繁报这个错？？？？？？事实上手动查看还经常是正常响应的？？？？？？
 		return nil, fmt.Errorf("docker hub resp 0 tag to repo %s/%s", repoNamespace, repoName)
 	} else if pageResult.Count > 10000 {
 		// 记录tag过多的镜像名
@@ -166,6 +184,12 @@ func ReqTagsMetadata(repoNamespace, repoName string, page, pageSize int) ([]*Tag
 	for _, tMeta := range res {
 		tMeta.RepositoryNamespace = repoNamespace
 		tMeta.RepositoryName = repoName
+	}
+
+	if limit, e := strconv.Atoi(limitStr); e == nil {
+		if limit <= 20 {
+			time.Sleep(20 * time.Second)
+		}
 	}
 
 	return res, nil
@@ -184,13 +208,13 @@ func ReqTagsAllMetadata(repoNamespace, repoName string, page, pageSize int) ([]*
 	}
 	defer resp.Body.Close()
 
+	// 检查http响应状态
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request %s got unexpected resp status code: %d", url, resp.StatusCode)
+	}
+
 	limitStr := resp.Header.Get("X-Ratelimit-Remaining")
 	Logger.Debug("get all tags metadata from API:", url, ", remained limit:", limitStr)
-	if limit, e := strconv.Atoi(limitStr); e == nil {
-		if limit <= 20 {
-			time.Sleep(20 * time.Second)
-		}
-	}
 
 	// body, err := io.ReadAll(resp.Body)
 	tagsBuf := bytes.Buffer{}
@@ -206,6 +230,12 @@ func ReqTagsAllMetadata(repoNamespace, repoName string, page, pageSize int) ([]*
 
 	res = append(res, pageResult.Results...)
 
+	if limit, e := strconv.Atoi(limitStr); e == nil {
+		if limit <= 20 {
+			time.Sleep(20 * time.Second)
+		}
+	}
+
 	for pageResult.Next != "" {
 		// fmt.Println(pageResult.Next)
 		newResp, err := httpClient.Get(pageResult.Next)
@@ -214,13 +244,14 @@ func ReqTagsAllMetadata(repoNamespace, repoName string, page, pageSize int) ([]*
 			break
 		}
 
+		// 检查http响应状态
+		if newResp.StatusCode != http.StatusOK {
+			newResp.Body.Close()
+			return nil, fmt.Errorf("request %s got unexpected resp status code: %d", url, resp.StatusCode)
+		}
+
 		limitStr = newResp.Header.Get("X-Ratelimit-Remaining")
 		Logger.Debug("get all tags metadata from API:", pageResult.Next, ", remained limit:", limitStr)
-		if limit, e := strconv.Atoi(limitStr); e == nil {
-			if limit <= 20 {
-				time.Sleep(20 * time.Second)
-			}
-		}
 
 		// body, err = io.ReadAll(newResp.Body)
 		tmpBuf := bytes.Buffer{}
@@ -242,11 +273,17 @@ func ReqTagsAllMetadata(repoNamespace, repoName string, page, pageSize int) ([]*
 
 		// 手动关闭resp
 		newResp.Body.Close()
+
+		if limit, e := strconv.Atoi(limitStr); e == nil {
+			if limit <= 20 {
+				time.Sleep(20 * time.Second)
+			}
+		}
 	}
 
 	// 处理404
 	if len(res) == 0 {
-		return nil, fmt.Errorf("docker hub resp 0 tag to repo %s/%s", repoNamespace, repoName)
+		return nil, fmt.Errorf("docker hub resp 0 tag all to repo %s/%s", repoNamespace, repoName)
 	}
 
 	for _, tMeta := range res {
@@ -269,13 +306,13 @@ func ReqImagesMetadata(repoNamespace, repoName, name string) ([]*Image, error) {
 	}
 	defer resp.Body.Close()
 
+	// 检查http响应状态码
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request %s got unexpected resp status code: %d", url, resp.StatusCode)
+	}
+
 	limitStr := resp.Header.Get("X-Ratelimit-Remaining")
 	Logger.Debug("get image metadata from API:", url, ", remained limit:", limitStr)
-	if limit, e := strconv.Atoi(limitStr); e == nil {
-		if limit <= 20 {
-			time.Sleep(20 * time.Second)
-		}
-	}
 
 	// body, err := io.ReadAll(resp.Body)
 	imgsBuf := bytes.Buffer{}
@@ -292,6 +329,12 @@ func ReqImagesMetadata(repoNamespace, repoName, name string) ([]*Image, error) {
 
 	if len(isMeta) == 0 {
 		return nil, fmt.Errorf("docker hub resp 404 to images %s/%s:%s", repoNamespace, repoName, name)
+	}
+
+	if limit, e := strconv.Atoi(limitStr); e == nil {
+		if limit <= 20 {
+			time.Sleep(20 * time.Second)
+		}
 	}
 
 	return isMeta, err

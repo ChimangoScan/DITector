@@ -8,7 +8,7 @@ const (
 	RegURLTemplate                = `https://hub.docker.com/api/content/v1/products/search?q=%s&source=%s&page=%s&page_size=%s`
 	NamespaceURLTemplate          = `https://hub.docker.com/v2/repositories/%s?page=%s&page_size=%s&ordering=last_updated`
 	RepositoryMetadataURLTemplate = `https://hub.docker.com/v2/repositories/%s/%s/`
-	RepoTagsURLTemplate           = `https://hub.docker.com/v2/repositories/%s/%s/tags/?page=%d&page_size=%d&name&ordering`
+	RepoTagsURLTemplate           = `https://hub.docker.com/v2/repositories/%s/%s/tags/?page=%d&page_size=%d`
 	TagMetadataURLTemplate        = `https://hub.docker.com/v2/repositories/%s/%s/tags/%s`
 	ImageMetadataURLTemplate      = `https://hub.docker.com/v2/repositories/%s/%s/tags/%s/images`
 )
