@@ -69,7 +69,7 @@ func ExtractPipInstallCmdsFromString(instruction string) []string {
 }
 
 // ParsePipInstallCmdArgs 解析pip install命令中的所有参数。
-// 其中"name" -> map[string][]string 用于记录每个python包的package name以及对应的版本要求。
+// 其中"_name" -> map[string][]string 用于记录每个python包的package name以及对应的版本要求。
 func ParsePipInstallCmdArgs(cmd string) map[string]any {
 	cmds := pipInstallArgsRe.FindStringSubmatch(cmd)
 	if len(cmds) <= 1 {
@@ -78,7 +78,7 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 	cmd = cmds[1]
 
 	args := make(map[string]interface{})
-	args["name"] = make(map[string][]string)
+	args["_name"] = make(map[string][]string)
 
 	words := strings.Split(cmd, " ")
 	consumption := false
@@ -95,9 +95,12 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 			// 由等于号赋值的部分直接把值写到表中
 			tmp := strings.Split(word, "=")
 			if len(tmp) > 1 {
-				word = strings.TrimLeft(tmp[0], "-")
+				key := strings.TrimLeft(tmp[0], "-")
+				if key == "_name" {
+					continue
+				}
 				val := tmp[1]
-				args[word] = val
+				args[key] = val
 			} else {
 				// 非等于号赋值的部分，检查是否是有值参数
 				if t, ok := pipOptionsWithArgs[word]; ok {
@@ -106,8 +109,11 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 					lastArgName = t
 				} else {
 					// 不是有值参数，直接作为bool存入
-					word = strings.TrimLeft(word, "-")
-					args[word] = true
+					key := strings.TrimLeft(word, "-")
+					if key == "_name" {
+						continue
+					}
+					args[key] = true
 				}
 			}
 		} else if strings.HasPrefix(word, "-") {
@@ -116,8 +122,11 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 				consumption = true
 				lastArgName = t
 			} else {
-				word = strings.TrimLeft(word, "-")
-				args[word] = true
+				key := strings.TrimLeft(word, "-")
+				if key == "_name" {
+					continue
+				}
+				args[key] = true
 			}
 		} else {
 			// 需要被消费的内容，直接将当前值存入上一个参数中
@@ -138,18 +147,18 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 								if commas[i] == "" {
 									break
 								} else {
-									args["name"].(map[string][]string)[lastPackageName] = append(args["name"].(map[string][]string)[lastPackageName], commas[i])
+									args["_name"].(map[string][]string)[lastPackageName] = append(args["_name"].(map[string][]string)[lastPackageName], commas[i])
 									// 取消消费状态
 									consumption = false
 									lastPackageName = ""
 									break
 								}
 							} else {
-								args["name"].(map[string][]string)[lastPackageName] = append(args["name"].(map[string][]string)[lastPackageName], commas[i])
+								args["_name"].(map[string][]string)[lastPackageName] = append(args["_name"].(map[string][]string)[lastPackageName], commas[i])
 							}
 						}
 					} else {
-						args["name"].(map[string][]string)[lastPackageName] = append(args["name"].(map[string][]string)[lastPackageName], word)
+						args["_name"].(map[string][]string)[lastPackageName] = append(args["_name"].(map[string][]string)[lastPackageName], word)
 						// 取消消费状态
 						consumption = false
 						lastPackageName = ""
@@ -168,9 +177,9 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 								if strings.Contains(commas[i], spec) {
 									specPos := strings.Index(commas[i], spec)
 									packageName := commas[i][0:specPos]
-									args["name"].(map[string][]string)[packageName] = make([]string, 0)
+									args["_name"].(map[string][]string)[packageName] = make([]string, 0)
 									specLimit := commas[i][specPos:]
-									args["name"].(map[string][]string)[packageName] = append(args["name"].(map[string][]string)[packageName], specLimit)
+									args["_name"].(map[string][]string)[packageName] = append(args["_name"].(map[string][]string)[packageName], specLimit)
 
 									lastPackageName = packageName
 									break
@@ -182,12 +191,12 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 								consumption = true
 							} else {
 								// 不以逗号结尾
-								args["name"].(map[string][]string)[lastPackageName] = append(args["name"].(map[string][]string)[lastPackageName], commas[i])
+								args["_name"].(map[string][]string)[lastPackageName] = append(args["_name"].(map[string][]string)[lastPackageName], commas[i])
 								lastPackageName = ""
 							}
 						} else {
 							// 中间位置直接加入
-							args["name"].(map[string][]string)[lastPackageName] = append(args["name"].(map[string][]string)[lastPackageName], commas[i])
+							args["_name"].(map[string][]string)[lastPackageName] = append(args["_name"].(map[string][]string)[lastPackageName], commas[i])
 						}
 					}
 				} else {
@@ -198,14 +207,14 @@ func ParsePipInstallCmdArgs(cmd string) map[string]any {
 							hasSpec = true
 							specPos := strings.Index(word, spec)
 							packageName := word[0:specPos]
-							args["name"].(map[string][]string)[packageName] = make([]string, 0)
+							args["_name"].(map[string][]string)[packageName] = make([]string, 0)
 							specLimit := word[specPos:]
-							args["name"].(map[string][]string)[packageName] = append(args["name"].(map[string][]string)[packageName], specLimit)
+							args["_name"].(map[string][]string)[packageName] = append(args["_name"].(map[string][]string)[packageName], specLimit)
 							break
 						}
 					}
 					if !hasSpec {
-						args["name"].(map[string][]string)[word] = make([]string, 0)
+						args["_name"].(map[string][]string)[word] = make([]string, 0)
 					}
 				}
 			}

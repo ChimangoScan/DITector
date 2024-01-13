@@ -28,7 +28,7 @@ func ExtractNpmInstallCmdsFromString(instruction string) []string {
 
 // ParseNpmInstallCmdArgs 解析npm install命令中的所有参数。
 // 因为npm install没有一个详尽的参数列表，且多少参数不需要有值传入，将所有-开头的参数都视作flag。
-// 返回值中"name" -> []string用于记录每个package的specifier。
+// 返回值中"_name" -> []string用于记录每个package的specifier。
 func ParseNpmInstallCmdArgs(cmd string) map[string]any {
 	cmds := npmInstallArgsRe.FindStringSubmatch(cmd)
 	if len(cmds) <= 1 {
@@ -37,18 +37,22 @@ func ParseNpmInstallCmdArgs(cmd string) map[string]any {
 	cmd = cmds[1]
 
 	args := make(map[string]interface{})
-	args["name"] = make(map[string][]string, 0)
+	args["_name"] = make(map[string][]string, 0)
 
 	for _, arg := range strings.Split(cmd, " ") {
 		// 以-开头的认为是参数，且都视为flag参数
 		if strings.HasPrefix(arg, "-") {
 			arg = strings.TrimLeft(arg, "-")
 			if arg != "" {
+				// 防止-name/--name将内容替换掉
+				if arg == "_name" {
+					continue
+				}
 				args[arg] = true
 			}
 		} else {
 			// 其他的都视为package
-			args["name"].(map[string][]string)[arg] = make([]string, 0)
+			args["_name"].(map[string][]string)[arg] = make([]string, 0)
 		}
 	}
 

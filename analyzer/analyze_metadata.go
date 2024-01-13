@@ -103,7 +103,7 @@ func extractInstalledContentsFromInstruction(instruction string, digest string) 
 	if extractor.CheckPipInstallCmd(instruction) {
 		for _, cmd := range extractor.ExtractPipInstallCmdsFromString(instruction) {
 			pipArgs := extractor.ParsePipInstallCmdArgs(cmd)
-			pkgsMap := pipArgs["name"].(map[string][]string)
+			pkgsMap := pipArgs["_name"].(map[string][]string)
 			for name, vers := range pkgsMap {
 				res = append(res, &myutils.InstalledContent{
 					Source:        "pip install",
@@ -121,7 +121,7 @@ func extractInstalledContentsFromInstruction(instruction string, digest string) 
 	if extractor.CheckNpmInstallCmd(instruction) {
 		for _, cmd := range extractor.ExtractNpmInstallCmdsFromString(instruction) {
 			npmArgs := extractor.ParseNpmInstallCmdArgs(cmd)
-			pkgsMap := npmArgs["name"].(map[string][]string)
+			pkgsMap := npmArgs["_name"].(map[string][]string)
 			for name, vers := range pkgsMap {
 				res = append(res, &myutils.InstalledContent{
 					Source:        "npm install",
