@@ -142,9 +142,42 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 
 	// 数据库已有检测结果，跳过下载和检测
 	if myutils.GlobalDBClient.MongoFlag {
-		if res, err := myutils.GlobalDBClient.Mongo.FindImgResultByName(ci.namespace, ci.repoName, ci.tagName); err == nil && res.ConfigurationAnalyzed && res.ContentAnalyzed {
-			myutils.Logger.Info("AnalyzeImage", name, "succeeded")
-			return res, nil
+		// TODO: 添加检查命令行工具覆盖位标识 --cover
+		// 区分是否指定了镜像digest
+		if ci.digest != "" {
+			if res, err := myutils.GlobalDBClient.Mongo.FindImgResultByExactName(ci.namespace, ci.repoName, ci.tagName, ci.digest); err == nil && res.ConfigurationAnalyzed && res.ContentAnalyzed {
+				myutils.Logger.Info("AnalyzeImage", name, "succeeded: previously analyzed")
+				return res, nil
+			} else {
+				tmpBeginTime := time.Now()
+				if res, err := myutils.GlobalDBClient.Mongo.FindImgResultByDigest(ci.digest); err == nil && res.ConfigurationAnalyzed && res.ContentAnalyzed {
+					res.Name = name
+					res.Registry = ci.registry
+					res.Namespace = ci.namespace
+					res.RepoName = ci.repoName
+					res.TagName = ci.tagName
+
+					res.TotalTime = time.Since(beginTime).String()
+					res.AnalyzeTime = time.Since(tmpBeginTime).String()
+
+					ci.wg.Add(1)
+					go func(imgRes *myutils.ImageResult) {
+						defer ci.wg.Done()
+						if e := myutils.GlobalDBClient.Mongo.UpdateImgResult(imgRes); e != nil {
+							myutils.Logger.Error("update ImageResult", imgRes.Name, imgRes.Digest, "failed with:", e.Error())
+						}
+					}(res)
+					ci.wg.Wait()
+
+					myutils.Logger.Info("AnalyzeImage", name, "succeeded: image with same digest previously analyzed")
+					return res, nil
+				}
+			}
+		} else {
+			if res, err := myutils.GlobalDBClient.Mongo.FindImgResultByName(ci.namespace, ci.repoName, ci.tagName); err == nil && res.ConfigurationAnalyzed && res.ContentAnalyzed {
+				myutils.Logger.Info("AnalyzeImage", name, "succeeded: previously analyzed")
+				return res, nil
+			}
 		}
 	}
 

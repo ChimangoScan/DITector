@@ -58,7 +58,7 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 	var repoPageSize int64 = 5
 	for {
 		// 根据build日志卡
-		if repoPage > 318036 {
+		if repoPage > 318206 {
 			fmt.Println(myutils.GetLocalNowTimeStr(), "finish: calculated all dependent weights for page:", repoPage-1, "page_size:", 5)
 			return
 		}

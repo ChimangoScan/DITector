@@ -61,14 +61,14 @@ func StrLegalForImage(s string) bool {
 }
 
 // DivideImageName 拆解镜像名称，[registry/][namespace/]repository[:tag][@digest]
-func DivideImageName(name string) (registry, namespace, repository, tag string) {
+func DivideImageName(name string) (registry, namespace, repository, tag, digest string) {
 	// obtain digest by splitting by "@"
 	digestParts := strings.Split(name, "@")
 	// 这个digest未必是系统中约束的image digest，也可能是tag digest
 	// 系统的image digest应是从元数据中匹配得到的
-	//if len(digestParts) == 2 {
-	//	digest = digestParts[1]
-	//}
+	if len(digestParts) == 2 {
+		digest = digestParts[1]
+	}
 
 	// obtain tag by splitting by ":"
 	nameParts := strings.Split(digestParts[0], ":")

@@ -108,7 +108,7 @@ func (currI *CurrentImage) ParseFromDockerEnv() (err error) {
 
 // parseName parses registry, namespace, repository, tag of the image according to name.
 func (currI *CurrentImage) parseName() {
-	currI.registry, currI.namespace, currI.repoName, currI.tagName = myutils.DivideImageName(currI.name)
+	currI.registry, currI.namespace, currI.repoName, currI.tagName, currI.digest = myutils.DivideImageName(currI.name)
 }
 
 // parseServerPlatform gets platform of the host with Docker client.
