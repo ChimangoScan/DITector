@@ -3,13 +3,15 @@ package scripts
 import (
 	"bufio"
 	"fmt"
-	"github.com/Musso12138/docker-scan/analyzer"
-	"github.com/Musso12138/docker-scan/myutils"
 	"io"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/Musso12138/docker-scan/analyzer"
+	"github.com/Musso12138/docker-scan/myutils"
 )
 
 // BatchAnalyzeByName 批量并发检测镜像
@@ -73,8 +75,18 @@ func batchAnalyzeByNameWorker(workerId int, jobs <-chan string, partial bool, wg
 			}
 		} else {
 			_, err := analyzer.AnalyzeImageByName(job, true)
-			if err != nil {
-				myutils.Logger.Error("batchAnalyzeWorker", strconv.Itoa(workerId), "analyze image", job, "failed with:", err.Error())
+			for err != nil {
+				// 达到下载次数限制
+				if strings.Contains(err.Error(), "toomanyrequests") {
+					myutils.Logger.Error("batchAnalyzeWorker", strconv.Itoa(workerId), "analyze image", job, "failed with:", err.Error(), ", retrying after 1h...")
+					time.Sleep(1 * time.Hour)
+					_, err = analyzer.AnalyzeImageByName(job, true)
+					continue
+				} else {
+					// 其他错误正常退出
+					myutils.Logger.Error("batchAnalyzeWorker", strconv.Itoa(workerId), "analyze image", job, "failed with:", err.Error())
+					break
+				}
 			}
 		}
 	}

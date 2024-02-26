@@ -31,6 +31,14 @@ var GlobalConfig struct {
 		ProxyFile  string `yaml:"proxy_file"`
 		MysqlDSN   string `yaml:"mysql_dsn"`
 	} `yaml:"crawler_config"`
+	DockerConfig struct {
+		Username      string `yaml:"username"`
+		Password      string `yaml:"password"`
+		Auth          string `yaml:"auth"`
+		ServerAddress string `yaml:"serveraddress"`
+		IdentityToken string `yaml:"identitytoken"`
+		RegistryToken string `yaml:"registrytoken"`
+	} `yaml:"docker_config"`
 	MongoConfig struct {
 		URI         string `yaml:"uri"`
 		Database    string `yaml:"database"`

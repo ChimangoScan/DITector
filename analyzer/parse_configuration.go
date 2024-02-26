@@ -2,12 +2,14 @@ package analyzer
 
 import (
 	"encoding/json"
-	"github.com/docker/docker/api/types/container"
+	"fmt"
 	"os"
 	"path"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/docker/docker/api/types/container"
 )
 
 type Configuration struct {
@@ -32,7 +34,7 @@ var (
 	defaultExecFileR = regexp.MustCompile(`^(?:python\s+|./)?(\S+)`)
 )
 
-// parseConfigurationFromFile TODO: loads image config from file <digest>.json (CurrentImage.manifest.Config).
+// parseConfigurationFromFile loads image config from file <digest>.json (CurrentImage.manifest.Config).
 func (currI *CurrentImage) parseConfigurationFromFile() error {
 	manifestData, err := os.ReadFile(path.Join(currI.imgFilepath, currI.manifest.Config))
 	if err != nil {
@@ -48,6 +50,10 @@ func (currI *CurrentImage) parseConfigurationFromFile() error {
 	currI.os, currI.osVersion = currI.configuration.Os, currI.configuration.OsVersion
 
 	// 解析容器默认启动命令
+	// 空指针？？？？？加个检查
+	if currI.configuration.Config == nil {
+		return fmt.Errorf("got nil configuration.Config in image %s", currI.name)
+	}
 	currI.defaultCmd.entrypoint = strings.TrimSpace(strings.Join(currI.configuration.Config.Entrypoint, " "))
 	currI.defaultCmd.cmd = strings.TrimSpace(strings.Join(currI.configuration.Config.Cmd, " "))
 	if currI.defaultCmd.entrypoint != "" {

@@ -2,21 +2,25 @@ package analyzer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/client"
 	"io"
 	"os"
 	"path"
 	"strings"
 	"sync"
+
+	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/registry"
+	"github.com/docker/docker/client"
 )
 
 type CurrentImage struct {
-	dockerClient *client.Client
-	wg           sync.WaitGroup
+	dockerClient        *client.Client
+	dockerAuthConfigStr string
+	wg                  sync.WaitGroup
 
 	name         string
 	registry     string
@@ -104,6 +108,26 @@ func NewCurrentImage(imgName string) (*CurrentImage, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// myutils.GlobalConfig.DockerConfig.Password使用的是Docker Hub生成的token
+	// https://docs.docker.com/security/for-developers/access-tokens/
+	if myutils.GlobalConfig.DockerConfig.Username != "" && myutils.GlobalConfig.DockerConfig.Password != "" {
+		authConfig := registry.AuthConfig{
+			Username:      myutils.GlobalConfig.DockerConfig.Username,
+			Password:      myutils.GlobalConfig.DockerConfig.Password,
+			Auth:          myutils.GlobalConfig.DockerConfig.Auth,
+			ServerAddress: myutils.GlobalConfig.DockerConfig.ServerAddress,
+			IdentityToken: myutils.GlobalConfig.DockerConfig.IdentityToken,
+			RegistryToken: myutils.GlobalConfig.DockerConfig.RegistryToken,
+		}
+		encodedJSON, err := json.Marshal(authConfig)
+		if err != nil {
+			myutils.Logger.Error("json marshal Docker auth config failed with:", err.Error())
+			return nil, err
+		}
+		currI.dockerAuthConfigStr = base64.URLEncoding.EncodeToString(encodedJSON)
+	}
+
 	currI.wg = sync.WaitGroup{}
 
 	currI.name = imgName
@@ -162,7 +186,8 @@ func (currI *CurrentImage) pullSaveExtractImage(targetDir string, finish chan do
 // pullImage calls client.Client.ImagePull to download image.
 // It turns ImagePull progress from async to sync with a non-buffered chan.
 func (currI *CurrentImage) pullImage() error {
-	rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{})
+
+	rc, err := currI.dockerClient.ImagePull(context.TODO(), currI.name, types.ImagePullOptions{RegistryAuth: currI.dockerAuthConfigStr})
 	if err != nil {
 		return err
 	}
@@ -175,15 +200,17 @@ func (currI *CurrentImage) pullImage() error {
 		event := new(imagePullEvent)
 		if err = decoder.Decode(event); err != nil {
 			if err == io.EOF {
+				success = true // 如果全程传输正常，则认为下载成功
 				break
 			}
 			myutils.Logger.Error("decode JSON when pulling image", currI.name, "failed with:", err.Error())
 		}
 
-		if strings.Contains(event.Status, "Downloaded newer image for") ||
-			strings.Contains(event.Status, "Image is up to date") {
-			success = true
-		}
+		// 不能用这个方法判断成功了，因为输出内容并未完全遍历，导致很多镜像被错过
+		// if strings.Contains(event.Status, "Downloaded newer image for") ||
+		// 	strings.Contains(event.Status, "Image is up to date") {
+		// 	success = true
+		// }
 	}
 
 	if success {
