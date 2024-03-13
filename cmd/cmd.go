@@ -125,10 +125,11 @@ var buildCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		format, _ := cmd.Flags().GetString("format")
 		page, _ := cmd.Flags().GetInt64("page")
-		pageSize, _ := cmd.Flags().GetInt("page_size")
+		pageSize, _ := cmd.Flags().GetInt64("page_size")
+		tagCnt, _ := cmd.Flags().GetInt("tags")
 		pullCountThreshold, _ := cmd.Flags().GetInt64("threshold")
-		fmt.Printf("%s Start to build, format: %s, page: %d, page_size:%d, threshold: %d\n", myutils.GetLocalNowTimeStr(), format, page, pageSize, pullCountThreshold)
-		buildgraph.Build(format, page, pageSize, pullCountThreshold)
+		fmt.Printf("%s Start to build, format: %s, page: %d, page_size:%d, tags: %d, threshold: %d\n", myutils.GetLocalNowTimeStr(), format, page, pageSize, tagCnt, pullCountThreshold)
+		buildgraph.Build(format, page, pageSize, tagCnt, pullCountThreshold)
 	},
 }
 
@@ -255,7 +256,8 @@ func init() {
 	// buildCmd
 	buildCmd.Flags().String("format", "mongo", "format of the source data, including: json, mongo")
 	buildCmd.Flags().Int64("page", 1, "start page for building from mongo")
-	buildCmd.Flags().Int("page_size", 10, "page size of each tag metadata API for custom repo")
+	buildCmd.Flags().Int64("page_size", 5, "start page_size of mongo")
+	buildCmd.Flags().Int("tags", 10, "page size of each tag metadata API for custom repo")
 	buildCmd.Flags().Int64("threshold", 1000000, "threshold of pull_count for getting all tags from API")
 
 	// analyzeCmd

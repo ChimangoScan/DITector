@@ -492,7 +492,7 @@ func (m *MyMongo) FindTagByName(repoNamespace, repoName, name string) (*Tag, err
 	return nil, fmt.Errorf("no metadata of tag %s/%s:%s found in mongo", repoNamespace, repoName, name)
 }
 
-// FindTagsByRepoNamePaged 根据namespace/repo/tag查找tag元数据，按照page, pageSize进行分页查找
+// FindTagsByRepoNamePaged 根据namespace/repo_name查找tag元数据，按照page, pageSize进行分页查找
 func (m *MyMongo) FindTagsByRepoNamePaged(repoNamespace, repoName string, page, pageSize int64) ([]*Tag, error) {
 	res := make([]*Tag, 0)
 

@@ -175,7 +175,7 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 			}
 		} else {
 			if res, err := myutils.GlobalDBClient.Mongo.FindImgResultByName(ci.namespace, ci.repoName, ci.tagName); err == nil && res.ConfigurationAnalyzed && res.ContentAnalyzed {
-				myutils.Logger.Info("AnalyzeImage", name, "succeeded: previously analyzed")
+				myutils.Logger.Info("AnalyzeImage", name, "succeeded: repo:tag previously analyzed")
 				return res, nil
 			}
 		}

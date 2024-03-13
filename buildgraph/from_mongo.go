@@ -27,12 +27,12 @@ var (
 // StartFromMongo
 // page是遍历mongodb时，以5个repo为1页对应的当前page
 // pageSize是查询非library repo的tag API时，一页返回的tag数量
-func StartFromMongo(page int64, pageSize int, pullCountThreshold int64) {
+func StartFromMongo(page int64, pageSize int64, tagCnt int, pullCountThreshold int64) {
 	beginTime := time.Now()
 	fmt.Println("build from Mongo begin at:", myutils.GetLocalNowTimeStr())
 
 	wg := sync.WaitGroup{}
-	go loadDataFromMongo(page, pageSize, pullCountThreshold, chanGraphJob, &wg)
+	go loadDataFromMongo(page, pageSize, tagCnt, pullCountThreshold, chanGraphJob, &wg)
 	go buildGraphFromMongo(chanGraphJob, chanDone)
 	<-chanDone
 
@@ -41,7 +41,7 @@ func StartFromMongo(page int64, pageSize int, pullCountThreshold int64) {
 	fmt.Println("total used time:", time.Since(beginTime))
 }
 
-func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch chan GraphJob, wg *sync.WaitGroup) {
+func loadDataFromMongo(page int64, pageSize int64, tagCnt int, pullCountThreshold int64, ch chan GraphJob, wg *sync.WaitGroup) {
 	defer close(ch)
 
 	beginTime := time.Now()
@@ -52,7 +52,7 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 	// 逐页查找repo
 	var repoCnt = 0
 	var repoPage int64 = page
-	var repoPageSize int64 = 5
+	var repoPageSize int64 = pageSize
 	for {
 		// 先改成只插入library的
 		// repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(map[string]any{"namespace": "library"}, repoPage, repoPageSize)
@@ -105,9 +105,9 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 				// 	tagFromAPIFlag = true
 				// } else {
 				// 其他镜像先尝试从mongodb获取pageSize个
-				tagDocs, err = myutils.GlobalDBClient.Mongo.FindTagsByRepoNamePaged(repoDoc.Namespace, repoDoc.Name, tagPage, int64(pageSize))
+				tagDocs, err = myutils.GlobalDBClient.Mongo.FindTagsByRepoNamePaged(repoDoc.Namespace, repoDoc.Name, tagPage, int64(tagCnt))
 				if err != nil {
-					myutils.Logger.Error(fmt.Sprintf("find tags for repository %s/%s in MongoDB page: %d, pagesize: %d, got error: %s", repoDoc.Namespace, repoDoc.Name, tagPage, pageSize, err))
+					myutils.Logger.Error(fmt.Sprintf("find tags for repository %s/%s in MongoDB page: %d, pagesize: %d, got error: %s", repoDoc.Namespace, repoDoc.Name, tagPage, tagCnt, err))
 					continue
 				}
 
@@ -115,10 +115,10 @@ func loadDataFromMongo(page int64, pageSize int, pullCountThreshold int64, ch ch
 				if len(tagDocs) == 0 {
 					// 还是第一页，说明数据库里没记录到相关tag，从API拿pageSize个
 					if tagPage == 1 {
-						tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, pageSize)
+						tagDocs, err = myutils.ReqTagsMetadata(repoDoc.Namespace, repoDoc.Name, 1, tagCnt)
 						if err != nil {
 							myutils.Logger.Error(fmt.Sprintf("request tags list of repository %s/%s, page: %d, pagesize: %d from Docker Hub API failed with: %s",
-								repoDoc.Namespace, repoDoc.Name, 1, pageSize, err))
+								repoDoc.Namespace, repoDoc.Name, 1, tagCnt, err))
 							continue
 						}
 						tagFromAPIFlag = true

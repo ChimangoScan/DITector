@@ -164,27 +164,34 @@ func (currI *CurrentImage) getImageMetadata(fromAPI bool) (*myutils.Image, error
 
 	// 根据arch, os匹配tag元数据中的镜像digest
 	osMatched := false
-	for _, iit := range currI.metadata.tagMetadata.Images {
-		arch := fmt.Sprintf("%s:%s/%s:%s", iit.OS, iit.OSVersion, iit.Architecture, iit.Variant)
-		archList = append(archList, arch)
+	// image name中可能已经指定了digest
+	if currI.digest == "" {
+		for _, iit := range currI.metadata.tagMetadata.Images {
+			arch := fmt.Sprintf("%s:%s/%s:%s", iit.OS, iit.OSVersion, iit.Architecture, iit.Variant)
+			archList = append(archList, arch)
 
-		// 命中arch时覆盖digest
-		if currI.architecture == iit.Architecture {
-			// 有os命中更好，更覆盖
-			if currI.os == iit.OS {
-				if iit.Digest != "" {
+			// 命中arch时覆盖digest
+			if currI.architecture == iit.Architecture {
+				// 有os命中更好，更覆盖
+				if currI.os == iit.OS {
+					if iit.Digest != "" {
+						currI.digest = iit.Digest
+					}
+					osMatched = true
+				} else if !osMatched && (iit.OS == "" || iit.OS == "unknown") {
+					// os尚未命中时，如果tag的arch命中且os为空或unknown，可以暂存一个digest
+					if iit.Digest != "" {
+						currI.digest = iit.Digest
+					}
+				}
+				// 信息全部命中时直接退出
+				if osMatched && currI.variant == iit.Variant && currI.osVersion == iit.OSVersion {
+					break
+				}
+			} else if iit.Architecture == "" || iit.Architecture == "unknown" {
+				if currI.digest == "" {
 					currI.digest = iit.Digest
 				}
-				osMatched = true
-			} else if !osMatched && (iit.OS == "" || iit.OS == "unknown") {
-				// os尚未命中时，如果tag的arch命中且os为空或unknown，可以暂存一个digest
-				if iit.Digest != "" {
-					currI.digest = iit.Digest
-				}
-			}
-			// 信息全部命中时直接退出
-			if osMatched && currI.variant == iit.Variant && currI.osVersion == iit.OSVersion {
-				break
 			}
 		}
 	}
