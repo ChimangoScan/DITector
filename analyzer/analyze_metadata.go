@@ -52,6 +52,9 @@ func (analyzer *ImageAnalyzer) analyzeImageMetadata(ci *CurrentImage) (*myutils.
 
 	// 扫描隐私泄露
 	// 将image元数据中的layer信息写入临时文件
+	if ci.metadata.imageMetadata == nil || ci.metadata.imageMetadata.Layers == nil {
+		return nil, fmt.Errorf("nil pointer detected when analyzed image metadata of image %s, digest: %s", ci.name, ci.digest)
+	}
 	metaFilepath := path.Join(myutils.GlobalConfig.TmpDir, fmt.Sprintf("%s-%s-%s-meta.json", ci.namespace, ci.repoName, ci.tagName))
 	layerData, err := json.MarshalIndent(ci.metadata.imageMetadata.Layers, "", "    ")
 	if err != nil {

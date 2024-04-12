@@ -1,0 +1,352 @@
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/gin-gonic/gin"
+)
+
+// =========================================================
+// currently only used for response to RepositoriesView
+// =========================================================
+
+// RepositoryForServer only used for reply from this backend server
+type RepositoryForServer struct {
+	User            string         `json:"user"`
+	Name            string         `json:"name"`
+	Namespace       string         `json:"namespace"`
+	RepositoryType  string         `json:"repository_type"`
+	Description     string         `json:"description"`
+	IsPrivate       bool           `json:"is_private"`
+	IsAutomated     bool           `json:"is_automated"`
+	StarCount       int            `json:"star_count"`
+	PullCount       int64          `json:"pull_count"`
+	LastUpdated     string         `json:"last_updated"`
+	DateRegistered  string         `json:"date_registered"`
+	FullDescription string         `json:"full_description"`
+	Tags            []TagForServer `json:"tags"`
+}
+
+// TagForServer only used for reply from this backend server
+type TagForServer struct {
+	Name                string           `json:"tag_name"`
+	LastUpdated         string           `json:"last_updated"`
+	LastUpdaterUsername string           `json:"last_updater_username"`
+	TagLastPulled       string           `json:"tag_last_pulled"`
+	TagLastPushed       string           `json:"tag_last_pushed"`
+	MediaType           string           `json:"media_type"`
+	ContentType         string           `json:"content_type"`
+	Images              []ImageForServer `json:"images"`
+}
+
+// ImageForServer only used for reply from this backend server
+type ImageForServer struct {
+	Architecture string `json:"architecture"`
+	Variant      string `json:"variant"`
+	Digest       string `json:"digest"`
+}
+
+func RepositoriesToForServer(repos []*myutils.RepositoryOld) []*RepositoryForServer {
+	var res = make([]*RepositoryForServer, 0)
+
+	for _, repo := range repos {
+		tmpRepo := &RepositoryForServer{
+			User: repo.User, Name: repo.Name, Namespace: repo.Namespace,
+			RepositoryType: repo.RepositoryType, Description: repo.Description,
+			IsPrivate: repo.IsPrivate, IsAutomated: repo.IsAutomated,
+			StarCount: repo.StarCount, PullCount: repo.PullCount,
+			LastUpdated: repo.LastUpdated, DateRegistered: repo.DateRegistered,
+			FullDescription: repo.FullDescription, Tags: make([]TagForServer, 0),
+		}
+
+		for tagName, tagMeta := range repo.Tags {
+			tmpTag := TagForServer{
+				Name: tagName, LastUpdated: tagMeta.LastUpdated, LastUpdaterUsername: tagMeta.LastUpdaterUsername,
+				TagLastPulled: tagMeta.TagLastPulled, TagLastPushed: tagMeta.TagLastPushed,
+				MediaType: tagMeta.MediaType, ContentType: tagMeta.ContentType,
+				Images: make([]ImageForServer, 0),
+			}
+			for arch, i := range tagMeta.Images {
+				for variant, digest := range i {
+					tmpImage := ImageForServer{
+						Architecture: arch, Variant: variant, Digest: digest,
+					}
+
+					tmpTag.Images = append(tmpTag.Images, tmpImage)
+				}
+			}
+
+			tmpRepo.Tags = append(tmpRepo.Tags, tmpTag)
+		}
+
+		res = append(res, tmpRepo)
+	}
+
+	return res
+}
+
+// =========================================================
+
+// handleRepositoriesSearchOld return a function used for
+// repositories searching API exported by gin framework
+//
+// URI arguments:
+//
+// search: keyword for searching repositories from MongoDB,
+//
+//	now search according to name > namespace > description > full_description
+//
+// page: current page of the view
+//
+// page_size: page size of the view
+func handleRepositoriesSearchOld() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		search := c.DefaultQuery("search", "")
+		pageStr := c.DefaultQuery("page", "1")
+		pageSizeStr := c.DefaultQuery("page_size", "10")
+
+		page, err := strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+		pageSize, err := strconv.Atoi(pageSizeStr)
+		if err != nil || pageSize < 1 {
+			pageSize = 10
+		}
+
+		totalCnt := totalRepoCnt
+		if search != "" {
+			// time costs too much
+			totalCnt, _ = myutils.GlobalDBClient.Mongo.CountRepoByText(search)
+		}
+		results, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByText(search, int64(page), int64(pageSize))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"msg": err.Error(),
+			})
+		} else {
+			// used to handle CORS requests
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.JSON(http.StatusOK, gin.H{
+				"count":     totalCnt,
+				"page":      page,
+				"page_size": pageSize,
+				"results":   results,
+			})
+		}
+	}
+}
+
+// =========================================================
+// used for mapping analysis results of images to layers
+// =========================================================
+
+type ImageWithResults struct {
+	Architecture string             `json:"architecture"`
+	Features     string             `json:"features"`
+	Variant      string             `json:"variant"`
+	Digest       string             `json:"digest"`
+	Layers       []LayerWithResults `json:"layers"`
+	OS           string             `json:"os"`
+	Size         int64              `json:"size"`
+	Status       string             `json:"status"`
+	LastPulled   string             `json:"last_pulled"`
+	LastPushed   string             `json:"last_pushed"`
+}
+
+type LayerWithResults struct {
+	Digest      string `json:"digest,omitempty"`
+	Size        int    `json:"size"`
+	Instruction string `json:"instruction"`
+	Results     string `json:"results"`
+}
+
+func ImagesToWithResults(imgs []*myutils.Image) []*ImageWithResults {
+	imgWithRes := make([]*ImageWithResults, 0)
+
+	for _, img := range imgs {
+		results, err := myutils.GlobalDBClient.Mongo.FindImgResultByDigest(img.Digest)
+		if err != nil {
+			continue
+		}
+
+		tmp := combineImageAndResult(img, results)
+		imgWithRes = append(imgWithRes, tmp)
+	}
+
+	return imgWithRes
+}
+
+func combineImageAndResult(img *myutils.Image, res *myutils.ImageResult) *ImageWithResults {
+	imgres := &ImageWithResults{
+		Architecture: img.Architecture, Features: img.Features, Variant: img.Variant,
+		Digest: img.Digest, OS: img.OS, Size: img.Size, Status: img.Status,
+		LastPulled: img.LastPulled, LastPushed: img.LastPushed,
+	}
+
+	// add layers of img to imgres
+	for _, layer := range img.Layers {
+		tmpLayer := LayerWithResults{}
+		b, _ := json.Marshal(layer)
+		json.Unmarshal(b, &tmpLayer)
+		imgres.Layers = append(imgres.Layers, tmpLayer)
+	}
+
+	// regex match
+	re, _ := regexp.Compile(`layer\[(\d+)]\.instruction`)
+
+	// add results to layer according to result.Path
+	// TODO: 这里只是为了编译通过，后面要改
+	for _, result := range res.MetadataResult.SecretLeakages {
+		if result.Type == "in-dockerfile-command" {
+			layerIndex := re.FindStringSubmatch(result.Path)
+			if len(layerIndex) > 1 {
+				index, err := strconv.Atoi(layerIndex[1])
+				if err != nil {
+					continue
+				}
+				b, err := json.Marshal(result)
+				if err != nil {
+					continue
+				}
+				imgres.Layers[index].Results = string(b)
+			}
+		}
+	}
+
+	return imgres
+}
+
+// =========================================================
+// handleImagesSearchOld return a function used for images
+// searching API exported by gin framework
+//
+// URI arguments:
+// search: keyword for searching images from MongoDB,
+//
+//	now only searching according to digest
+//
+// page: current page of the view
+//
+// page_size: page size of the view
+func handleImagesSearchOld() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		search := c.DefaultQuery("search", "")
+		pageStr := c.DefaultQuery("page", "1")
+		pageSizeStr := c.DefaultQuery("page_size", "10")
+
+		page, err := strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+
+		totalCnt := totalImgCnt
+		if search != "" && !strings.Contains(search, "sha256:") {
+			// time costs too much
+			totalCnt, _ = myutils.GlobalDBClient.Mongo.CountRepoByText(search)
+		}
+		pageSize, err := strconv.Atoi(pageSizeStr)
+		if err != nil || pageSize < 1 {
+			pageSize = 10
+		}
+
+		results, err := myutils.GlobalDBClient.Mongo.FindImageByDigest(search)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"msg": err.Error(),
+			})
+		} else {
+			// used to handle CORS requests
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.JSON(http.StatusOK, gin.H{
+				"count":     totalCnt,
+				"page":      page,
+				"page_size": pageSize,
+				// "results":   ImagesToWithResults(results),
+				"results": results,
+			})
+		}
+	}
+}
+
+func ResultsToImagesWithResults(imgRes []*myutils.ImageResult) []*ImageWithResults {
+	imgWithRes := make([]*ImageWithResults, 0)
+
+	for _, res := range imgRes {
+		img, err := myutils.GlobalDBClient.Mongo.FindImageByDigest(res.Digest)
+		if err != nil {
+			continue
+		}
+		tmp := combineImageAndResult(img, res)
+		imgWithRes = append(imgWithRes, tmp)
+	}
+
+	return imgWithRes
+}
+
+// =========================================================
+// handleResultsSearch return a function used for results
+// searching API exported by gin framework
+//
+// URI arguments:
+// search: keyword for searching images from MongoDB,
+//
+//	now only searching according to digest
+//
+// page: current page of the view
+//
+// page_size: page size of the view
+func handleResultsSearchOld() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		search := c.DefaultQuery("search", "")
+		pageStr := c.DefaultQuery("page", "1")
+		pageSizeStr := c.DefaultQuery("page_size", "10")
+
+		page, err := strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+
+		totalCnt := totalImgCnt
+		if search != "" {
+			// time costs too much
+			totalCnt, _ = myutils.GlobalDBClient.Mongo.CountImgResByText(search)
+		}
+		pageSize, err := strconv.Atoi(pageSizeStr)
+		if err != nil || pageSize < 1 {
+			pageSize = 10
+		}
+
+		results, err := myutils.GlobalDBClient.Mongo.FindImgResultByText(search, int64(page), int64(pageSize))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"msg": err.Error(),
+			})
+		} else {
+			// used to handle CORS requests
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.JSON(http.StatusOK, gin.H{
+				"count":     totalCnt,
+				"page":      page,
+				"page_size": pageSize,
+				"results":   ResultsToImagesWithResults(results),
+			})
+		}
+	}
+}
+
+// func handleImgResultSearch() func(c *gin.Context) {
+// 	return func(c *gin.Context) {
+// 		repoNamespace := c.DefaultQuery("repo_namespace", "")
+// 		repoName := c.DefaultQuery("repo_name", "")
+// 		tagName := c.DefaultQuery("tag_name", "")
+// 		digest := c.DefaultQuery("digest", "")
+
+// 		imgRes := myutils.GlobalDBClient.Mongo.FindImgResultByExactName()
+// 	}
+// }

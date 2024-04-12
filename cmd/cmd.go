@@ -192,7 +192,7 @@ var startCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		port, _ := cmd.Flags().GetString("port")
 		server.StartServer(port)
-		fmt.Println(port)
+		fmt.Println("start docker-scan backend server at port:", port)
 	},
 }
 
@@ -222,7 +222,7 @@ var executeCmd = &cobra.Command{
 			pageSize, _ := cmd.Flags().GetInt64("page_size")
 			tagCnt, _ := cmd.Flags().GetInt("tags")
 			partial, _ := cmd.Flags().GetBool("partial")
-			fmt.Println(myutils.GetLocalNowTimeStr(), "start to execute, script: analyze-all, page:", page, ", page_size:", pageSize, ", tags:", tagCnt, ", partial:", partial)
+			fmt.Println(myutils.GetLocalNowTimeStr(), "start to execute, script:", script, ", page:", page, ", page_size:", pageSize, ", tags:", tagCnt, ", partial:", partial)
 			err := scripts.AnalyzeAll(page, pageSize, tagCnt, partial)
 			if err != nil {
 				log.Fatalln("analyze-all got error:", err)
@@ -244,6 +244,16 @@ var executeCmd = &cobra.Command{
 			err := scripts.CountNodeWithUpstreamImages(file, page, int(pageSize), threshold)
 			if err != nil {
 				log.Fatalln("calculate-node-weights got error:", err)
+			}
+		case "supplement-image-analysis":
+			page, _ := cmd.Flags().GetInt64("page")
+			pageSize, _ := cmd.Flags().GetInt64("page_size")
+			tagCnt, _ := cmd.Flags().GetInt("tags")
+			partial, _ := cmd.Flags().GetBool("partial")
+			fmt.Println(myutils.GetLocalNowTimeStr(), "start to execute, script:", script, ", page:", page, ", page_size:", pageSize, ", tags:", tagCnt, ", partial:", partial)
+			err := scripts.SupplementImageAnalysis(page, pageSize, tagCnt, partial)
+			if err != nil {
+				log.Fatalln("supplement-image-analysis got error:", err)
 			}
 		}
 	},

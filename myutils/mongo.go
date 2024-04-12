@@ -388,6 +388,9 @@ func (m *MyMongo) FindRepositoriesByKeywordPaged(KeyMap map[string]any, page, pa
 
 	filter := bson.M{}
 	for k, v := range KeyMap {
+		if k == "" {
+			continue
+		}
 		filter[k] = v
 	}
 
@@ -403,6 +406,17 @@ func (m *MyMongo) FindRepositoriesByKeywordPaged(KeyMap map[string]any, page, pa
 	}
 
 	return res, nil
+}
+
+func (m *MyMongo) CountRepoByKeyword(KeyMap map[string]any) (int64, error) {
+	filter := bson.M{}
+	for k, v := range KeyMap {
+		if k == "" {
+			continue
+		}
+		filter[k] = v
+	}
+	return m.RepoColl.CountDocuments(context.TODO(), filter)
 }
 
 func (m *MyMongo) FindRepositoriesByText(search string, page, pageSize int64) ([]*Repository, error) {
@@ -571,6 +585,88 @@ func (m *MyMongo) FindAllTagsByRepoName(repoNamespace, repoName string) ([]*Tag,
 	return res, nil
 }
 
+func (m *MyMongo) FindTagByImgDigestPaged(digest string, page, pageSize int64) ([]*Tag, error) {
+	if len(digest) != 71 || !strings.HasPrefix(digest, "sha256:") {
+		return nil, fmt.Errorf("inputed FindTagByImgDigestPaged digest is not legal")
+	}
+	res := make([]*Tag, 0)
+
+	filter := bson.M{"images.digest": digest}
+	optLimit := options.Find().SetSkip((page - 1) * pageSize).SetLimit(pageSize)
+
+	cursor, err := m.TagColl.Find(context.TODO(), filter, optLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	if err = cursor.All(context.TODO(), &res); err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (m *MyMongo) FindTagByKeywordPaged(KeyMap map[string]any, page, pageSize int64) ([]*Tag, error) {
+	res := make([]*Tag, 0)
+
+	filter := bson.M{}
+	for k, v := range KeyMap {
+		if k == "" {
+			continue
+		}
+		filter[k] = v
+	}
+
+	optLimit := options.Find().SetSkip((page - 1) * pageSize).SetLimit(pageSize)
+	cursor, err := m.TagColl.Find(context.TODO(), filter, optLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	if err = cursor.All(context.TODO(), &res); err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (m *MyMongo) CountTagByKeyword(KeyMap map[string]any) (int64, error) {
+	filter := bson.M{}
+	for k, v := range KeyMap {
+		if k == "" {
+			continue
+		}
+		filter[k] = v
+	}
+	return m.TagColl.CountDocuments(context.TODO(), filter)
+}
+
+func (m *MyMongo) FindTagByTextPaged(search string, page, pageSize int64) ([]*Tag, error) {
+	res := make([]*Tag, 0)
+
+	filter := bson.D{{"$text", bson.D{{"$search", sanitizeSearchString(search)}}}}
+
+	optLimit := options.Find().SetSkip((page - 1) * pageSize).SetLimit(pageSize)
+	cursor, err := m.TagColl.Find(context.TODO(), filter, optLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	if err = cursor.All(context.TODO(), &res); err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (m *MyMongo) CountTagByText(search string) (int64, error) {
+	filter := bson.D{{"$text", bson.D{{"$search", sanitizeSearchString(search)}}}}
+	return m.TagColl.CountDocuments(context.TODO(), filter)
+}
+
 func (m *MyMongo) UpdateImage(iMeta *Image) error {
 	filter := bson.M{
 		"digest": iMeta.Digest,
@@ -594,6 +690,43 @@ func (m *MyMongo) FindImageByDigest(digest string) (*Image, error) {
 	err := m.ImgColl.FindOne(context.Background(), filter).Decode(iMeta)
 
 	return iMeta, err
+}
+
+// 传入的KeyMap应该仅为空，或仅包含digest字段
+func (m *MyMongo) FindImageByKeywordPaged(KeyMap map[string]any, page, pageSize int64) ([]*Image, error) {
+	res := make([]*Image, 0)
+
+	filter := bson.M{}
+	for k, v := range KeyMap {
+		if k == "" {
+			continue
+		}
+		filter[k] = v
+	}
+
+	optLimit := options.Find().SetSkip((page - 1) * pageSize).SetLimit(pageSize)
+	cursor, err := m.ImgColl.Find(context.TODO(), filter, optLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	if err = cursor.All(context.TODO(), &res); err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (m *MyMongo) CountImageByKeyword(KeyMap map[string]any) (int64, error) {
+	filter := bson.M{}
+	for k, v := range KeyMap {
+		if k == "" {
+			continue
+		}
+		filter[k] = v
+	}
+	return m.ImgColl.CountDocuments(context.TODO(), filter)
 }
 
 func (m *MyMongo) UpdateImgResult(imgRes *ImageResult) error {

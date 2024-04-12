@@ -1,8 +1,9 @@
 package server
 
 import (
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 func StartServer(port string) {
@@ -16,10 +17,11 @@ func StartServer(port string) {
 		})
 	})
 
-	// router.Get("/imageresult", handleImgResultSearch())
-	router.GET("/images", handleImagesSearch())
 	router.GET("/repositories", handleRepositoriesSearch())
-	router.GET("/results", handleResultSearch())
+	router.GET("/tags", handleTagsSearch())
+	router.GET("/images", handleImagesSearch())
+	router.GET("/results", handleResultsSearch())
+	router.GET("/result", handleResultSearch())
 
 	router.Run(":" + port)
 }

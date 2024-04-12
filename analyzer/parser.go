@@ -22,16 +22,17 @@ type CurrentImage struct {
 	dockerAuthConfigStr string
 	wg                  sync.WaitGroup
 
-	name         string
-	registry     string
-	namespace    string
-	repoName     string
-	tagName      string
-	architecture string
-	variant      string
-	os           string
-	osVersion    string
-	digest       string
+	name           string
+	registry       string
+	namespace      string
+	repoName       string
+	tagName        string
+	architecture   string
+	variant        string
+	os             string
+	osVersion      string
+	digest         string
+	digestFromName bool
 
 	// metadata of the repository, the tag and the image
 	repoMetaFromAPI bool
@@ -132,6 +133,9 @@ func NewCurrentImage(imgName string) (*CurrentImage, error) {
 
 	currI.name = imgName
 	currI.parseName()
+	if currI.digest != "" {
+		currI.digestFromName = true
+	}
 
 	// 初始化引用变量
 	currI.metadata = new(metadata)

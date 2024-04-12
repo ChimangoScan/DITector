@@ -11,6 +11,21 @@ var (
 	extRecommendCmdRE = regexp.MustCompile(`docker\s+run.*(?:\\[\n\r].+)*.`)
 )
 
+type ImageUpdatedAfterTagError struct {
+	tagName string
+}
+
+func (e *ImageUpdatedAfterTagError) Error() string {
+	return fmt.Sprint("images of tag: %s may have updated after tag", e.tagName)
+}
+
+func isImageUpdatedAfterTagError(e error) bool {
+	if _, ok := e.(*ImageUpdatedAfterTagError); ok {
+		return true
+	}
+	return false
+}
+
 // parseMetadata loads metadata of repository
 func (currI *CurrentImage) parseMetadata(partial, fromAPI bool) error {
 
@@ -24,7 +39,13 @@ func (currI *CurrentImage) parseMetadata(partial, fromAPI bool) error {
 
 	if partial {
 		if err := currI.parseImageMetadata(fromAPI); err != nil {
-			return err
+			if isImageUpdatedAfterTagError(err) {
+				if e := currI.parseMetadata(partial, true); e != nil {
+					return e
+				}
+			} else {
+				return err
+			}
 		}
 	}
 
@@ -156,7 +177,7 @@ func (currI *CurrentImage) getImageMetadata(fromAPI bool) (*myutils.Image, error
 	var isMeta []*myutils.Image
 
 	// 检查是否有architecture和os记录
-	if currI.architecture == "" || currI.os == "" {
+	if currI.digest == "" && currI.architecture == "" && currI.os == "" {
 		return nil, fmt.Errorf("no architecture or os parsed in current image")
 	}
 
@@ -164,8 +185,10 @@ func (currI *CurrentImage) getImageMetadata(fromAPI bool) (*myutils.Image, error
 
 	// 根据arch, os匹配tag元数据中的镜像digest
 	osMatched := false
+
+	// 如果digest为空，根据arch和os匹配获得信息
 	// image name中可能已经指定了digest
-	if currI.digest == "" {
+	if currI.digest == "" || !currI.digestFromName {
 		for _, iit := range currI.metadata.tagMetadata.Images {
 			arch := fmt.Sprintf("%s:%s/%s:%s", iit.OS, iit.OSVersion, iit.Architecture, iit.Variant)
 			archList = append(archList, arch)
@@ -196,6 +219,7 @@ func (currI *CurrentImage) getImageMetadata(fromAPI bool) (*myutils.Image, error
 		}
 	}
 
+	// 如果到这里digest还是为空，说明根据名称和arch解析的digest都失败了
 	if currI.digest == "" {
 		return nil, fmt.Errorf("no image with the same platform %s:%s/%s:%s was found in tag %s/%s/%s:%s metadata %s",
 			currI.os, currI.osVersion, currI.architecture, currI.variant, currI.registry, currI.namespace, currI.repoName, currI.tagName, archList)
@@ -224,22 +248,42 @@ func (currI *CurrentImage) getImageMetadata(fromAPI bool) (*myutils.Image, error
 			break
 		}
 	}
+
+	// 在检测时指定的digest匹配不上就要返回错误
 	if iMeta == nil {
-		return nil, fmt.Errorf("no image with the same platform %s was found in tag %s metadata",
-			currI.os+"/"+currI.architecture, currI.registry+"/"+currI.namespace+"/"+currI.repoName+":"+currI.tagName)
+		if currI.digestFromName {
+			return nil, fmt.Errorf("no image digest: %s was found in tag %s metadata", currI.digest,
+				currI.registry+"/"+currI.namespace+"/"+currI.repoName+":"+currI.tagName)
+		} else if !currI.tagMetaFromAPI {
+			return nil, &ImageUpdatedAfterTagError{currI.registry + "/" + currI.namespace + "/" + currI.repoName + ":" + currI.tagName}
+		} else {
+			return nil, fmt.Errorf("no image digest: %s with the same platform %s was found in tag %s metadata",
+				currI.digest, currI.os+"/"+currI.architecture, currI.registry+"/"+currI.namespace+"/"+currI.repoName+":"+currI.tagName)
+		}
 	}
 
 	// API结果正常，存入数据库，存数据库过程的error不需要返回
+	// TODO: 自由切换是全部保存还是只保存当前这一个镜像的信息
 	if myutils.GlobalDBClient.MongoFlag {
-		for _, imgMeta := range isMeta {
-			currI.wg.Add(1)
-			go func(imgMetadata *myutils.Image) {
-				defer currI.wg.Done()
-				if e := myutils.GlobalDBClient.Mongo.UpdateImage(imgMetadata); e != nil {
-					myutils.Logger.Error("update metadata of image", imgMetadata.Digest, "failed with:", e.Error())
-				}
-			}(imgMeta)
-		}
+		// 拿到的tag的全部image元数据都保存
+		// for _, imgMeta := range isMeta {
+		// 	currI.wg.Add(1)
+		// 	go func(imgMetadata *myutils.Image) {
+		// 		defer currI.wg.Done()
+		// 		if e := myutils.GlobalDBClient.Mongo.UpdateImage(imgMetadata); e != nil {
+		// 			myutils.Logger.Error("update metadata of image", imgMetadata.Digest, "failed with:", e.Error())
+		// 		}
+		// 	}(imgMeta)
+		// }
+
+		// 只保存当前这个镜像的信息
+		currI.wg.Add(1)
+		go func(imgMetadata *myutils.Image) {
+			defer currI.wg.Done()
+			if e := myutils.GlobalDBClient.Mongo.UpdateImage(imgMetadata); e != nil {
+				myutils.Logger.Error("update metadata of image", imgMetadata.Digest, "failed with:", e.Error())
+			}
+		}(iMeta)
 	}
 
 	// 标记元数据来自API

@@ -10,9 +10,12 @@ import (
 // ParsePartial 仅解析指定镜像的元数据
 func (currI *CurrentImage) ParsePartial() (err error) {
 	// 获取当前Docker server环境所在的平台信息
-	if err = currI.parseServerPlatform(); err != nil {
-		myutils.Logger.Error("get Docker server platform failed with:", err.Error())
-		return
+	// 只有digest为空的时候需要解析平台信息
+	if currI.digest == "" {
+		if err = currI.parseServerPlatform(); err != nil {
+			myutils.Logger.Error("get Docker server platform failed with:", err.Error())
+			return
+		}
 	}
 
 	if err = currI.parseMetadata(true, false); err != nil {
@@ -50,7 +53,13 @@ func (currI *CurrentImage) ParseFromFile() (err error) {
 
 	// 解析镜像image元数据
 	if err = currI.parseImageMetadata(false); err != nil {
-		return err
+		if isImageUpdatedAfterTagError(err) {
+			if e := currI.parseMetadata(true, true); e != nil {
+				return e
+			}
+		} else {
+			return err
+		}
 	}
 
 	// 根据时间检查镜像是否发生过更新，如果发生更新则从API获取
