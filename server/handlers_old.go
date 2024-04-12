@@ -322,7 +322,7 @@ func handleResultsSearchOld() func(c *gin.Context) {
 			pageSize = 10
 		}
 
-		results, err := myutils.GlobalDBClient.Mongo.FindImgResultByText(search, int64(page), int64(pageSize))
+		results, err := myutils.GlobalDBClient.Mongo.FindImgResultByTextPaged(search, int64(page), int64(pageSize))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"msg": err.Error(),

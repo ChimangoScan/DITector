@@ -607,6 +607,14 @@ func (m *MyMongo) FindTagByImgDigestPaged(digest string, page, pageSize int64) (
 	return res, nil
 }
 
+func (m *MyMongo) CountTagByImgDigest(digest string) (int64, error) {
+	if len(digest) != 71 || !strings.HasPrefix(digest, "sha256:") {
+		return 0, fmt.Errorf("inputed FindTagByImgDigestPaged digest is not legal")
+	}
+	filter := bson.M{"images.digest": digest}
+	return m.TagColl.CountDocuments(context.TODO(), filter)
+}
+
 func (m *MyMongo) FindTagByKeywordPaged(KeyMap map[string]any, page, pageSize int64) ([]*Tag, error) {
 	res := make([]*Tag, 0)
 
@@ -794,18 +802,74 @@ func (m *MyMongo) FindImgResultByName(namespace, repoName, tagName, digest strin
 	return res, err
 }
 
-func (m *MyMongo) FindImgResultByText(search string, page, pageSize int64) ([]*ImageResult, error) {
+func (m *MyMongo) FindImgResultsByNamePaged(namespace, repoName, tagName, digest string, page, pageSize int64) ([]*ImageResult, error) {
 	res := make([]*ImageResult, 0)
 
-	filter := bson.D{}
+	filter := bson.M{}
+	if namespace != "" {
+		filter["namespace"] = namespace
+	}
+	if repoName != "" {
+		filter["repository_name"] = repoName
+	}
+	if tagName != "" {
+		filter["tag_name"] = tagName
+	}
+	if digest != "" {
+		filter["digest"] = digest
+	}
 
+	optLimit := options.Find().SetSkip((page - 1) * pageSize).SetLimit(pageSize)
+	cursor, err := m.ImgResultColl.Find(context.TODO(), filter, optLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	if err = cursor.All(context.TODO(), &res); err != nil {
+		return nil, err
+	}
+
+	return res, err
+}
+
+func (m *MyMongo) CountImgResultsByName(namespace, repoName, tagName, digest string) (int64, error) {
+	filter := bson.M{}
+	allEmpty := true
+	if namespace != "" {
+		filter["namespace"] = namespace
+		allEmpty = false
+	}
+	if repoName != "" {
+		filter["repository_name"] = repoName
+		allEmpty = false
+	}
+	if tagName != "" {
+		filter["tag_name"] = tagName
+		allEmpty = false
+	}
+	if digest != "" {
+		filter["digest"] = digest
+		allEmpty = false
+	}
+
+	if allEmpty {
+		return m.ImgResultColl.EstimatedDocumentCount(context.TODO())
+	}
+	return m.ImgResultColl.CountDocuments(context.TODO(), filter)
+}
+
+func (m *MyMongo) FindImgResultByTextPaged(search string, page, pageSize int64) ([]*ImageResult, error) {
+	res := make([]*ImageResult, 0)
+
+	filter := bson.D{{"$text", bson.D{{"$search", search}}}}
 	err := m.ImgResultColl.FindOne(context.TODO(), filter).Decode(res)
 
 	return res, err
 }
 
 func (m *MyMongo) CountImgResByText(search string) (int64, error) {
-	filter := bson.D{{"$text", bson.D{{"$search", sanitizeSearchString(search)}}}}
+	filter := bson.D{{"$text", bson.D{{"$search", search}}}}
 	return m.ImgResultColl.CountDocuments(context.TODO(), filter)
 }
 

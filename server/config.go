@@ -12,14 +12,15 @@ import (
 var (
 	// totalCnt is the number of documents in each collection,
 	// used for calculate table pages
-	totalRepoCnt int64
-	totalTagCnt  int64
-	totalImgCnt  int64
-	configLock   = sync.WaitGroup{}
+	totalRepoCnt   int64
+	totalTagCnt    int64
+	totalImgCnt    int64
+	totalResultCnt int64
+	configLock     = sync.WaitGroup{}
 )
 
 func configServer() {
-	configLock.Add(3)
+	configLock.Add(4)
 	go func() {
 		defer configLock.Done()
 		if err := updateRepositoriesCnt(); err != nil {
@@ -36,6 +37,12 @@ func configServer() {
 		defer configLock.Done()
 		if err := updateImagesCnt(); err != nil {
 			fmt.Println("failed to get totalImgCnt, failed with:", err)
+		}
+	}()
+	go func() {
+		defer configLock.Done()
+		if err := updateResultsCnt(); err != nil {
+			fmt.Println("failed to get totalResultCnt, failed with:", err)
 		}
 	}()
 	configLock.Wait()
@@ -79,5 +86,12 @@ func updateImagesCnt() (err error) {
 	begin := time.Now()
 	totalImgCnt, err = myutils.GlobalDBClient.Mongo.ImgColl.EstimatedDocumentCount(context.TODO())
 	fmt.Println("total image count:", totalImgCnt, ", total time used:", time.Since(begin))
+	return
+}
+
+func updateResultsCnt() (err error) {
+	begin := time.Now()
+	totalResultCnt, err = myutils.GlobalDBClient.Mongo.ImgResultColl.EstimatedDocumentCount(context.TODO())
+	fmt.Println("total result count:", totalResultCnt, ", total time used:", time.Since(begin))
 	return
 }
