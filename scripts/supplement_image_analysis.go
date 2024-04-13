@@ -48,58 +48,102 @@ func jobGeneratorSupplement(page int64, pageSize int64, tagCnt int, partial bool
 	}
 
 	generatedWorks := 0
-	var repoPage int64 = page
-	// var pageSize int64 = 5
+
+	// var repoPage int64 = page
+	// // var pageSize int64 = 5
+	// for {
+	// 	repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(nil, repoPage, pageSize)
+	// 	if err != nil {
+	// 		myutils.Logger.Error(fmt.Sprintf("find repository in MongoDB page: %d, pagesize: %d, got error: %s", repoPage, pageSize, err))
+	// 		continue
+	// 	}
+	// 	// 进程结束标志: mongodb中没有更多repo
+	// 	if len(repoDocs) == 0 {
+	// 		break
+	// 	}
+
+	// 	// 根据tag生成任务
+	// 	for _, repoDoc := range repoDocs {
+	// 		tagDocs, err := myutils.GlobalDBClient.Mongo.FindTagsByRepoNamePaged(repoDoc.Namespace, repoDoc.Name, 1, int64(tagCnt))
+	// 		if err != nil {
+	// 			myutils.Logger.Error(fmt.Sprintf("find tags for repository %s/%s in MongoDB page: %d, pagesize: %d, got error: %s", repoDoc.Namespace, repoDoc.Name, 1, tagCnt, err))
+	// 			continue
+	// 		}
+
+	// 		// 生产任务
+	// 		// tag全是从Mongo获取的
+	// 		for _, tagDoc := range tagDocs {
+	// 			// tag已经检查过，跳过当前tag
+	// 			if _, err := myutils.GlobalDBClient.Mongo.FindImgResultByName(tagDoc.RepositoryNamespace, tagDoc.RepositoryName, tagDoc.Name, ""); err == nil {
+	// 				myutils.Logger.Warn("repo:tag already analyzed before:", tagDoc.RepositoryNamespace, "/", tagDoc.RepositoryName, ":", tagDoc.Name)
+	// 				continue
+	// 			}
+
+	// 			digest := ""
+
+	// 			// 对每个tag至多取一个image
+	// 			for _, img := range tagDoc.Images {
+	// 				// 对应的digest已经检查过，跳过
+	// 				if _, err := myutils.GlobalDBClient.Mongo.FindImgResultByDigest(img.Digest); err == nil {
+	// 					continue
+	// 				}
+	// 				// 对应的image在数据库
+	// 				if _, err := myutils.GlobalDBClient.Mongo.FindImageByDigest(img.Digest); err == nil {
+	// 					digest = img.Digest
+	// 					break
+	// 				}
+	// 				// 根据arch大概选一个digest
+	// 				if img.Architecture == "amd64" || img.Architecture == "arm64" || img.Architecture == "unknown" || img.Architecture == "" {
+	// 					digest = img.Digest
+	// 				}
+	// 			}
+
+	// 			if digest != "" {
+	// 				jobCh <- job{
+	// 					name:    fmt.Sprintf("%s/%s:%s@%s", repoDoc.Namespace, repoDoc.Name, tagDoc.Name, digest),
+	// 					partial: partial,
+	// 				}
+	// 				generatedWorks++
+	// 			}
+	// 		}
+	// 	}
+
+	// 	fmt.Printf("[%s] generatied all job for repo page: %d, page_size: %d, generated works: %d\n", myutils.GetLocalNowTimeStr(), repoPage, pageSize, generatedWorks)
+	// 	repoPage++
+	// }
+
+	// 执果索因
+	var imgPage int64 = page
 	for {
-		repoDocs, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(nil, repoPage, pageSize)
+		imgDocs, err := myutils.GlobalDBClient.Mongo.FindImageByKeywordPaged(nil, imgPage, pageSize)
 		if err != nil {
-			myutils.Logger.Error(fmt.Sprintf("find repository in MongoDB page: %d, pagesize: %d, got error: %s", repoPage, pageSize, err))
+			myutils.Logger.Error(fmt.Sprintf("find image in MongoDB page: %d, pagesize: %d, got error: %s", imgPage, pageSize, err))
 			continue
 		}
 		// 进程结束标志: mongodb中没有更多repo
-		if len(repoDocs) == 0 {
+		if len(imgDocs) == 0 {
 			break
 		}
 
-		// 根据tag生成任务
-		for _, repoDoc := range repoDocs {
-			tagDocs, err := myutils.GlobalDBClient.Mongo.FindTagsByRepoNamePaged(repoDoc.Namespace, repoDoc.Name, 1, int64(tagCnt))
+		// 根据image是否被检测生成任务
+		for _, imgDoc := range imgDocs {
+			// 已有结果，直接跳过
+			if _, err := myutils.GlobalDBClient.Mongo.FindImgResultByDigest(imgDoc.Digest); err == nil {
+				continue
+			}
+
+			// 找一批有这个image的tag
+			tagDocs, err := myutils.GlobalDBClient.Mongo.FindTagByImgDigestPaged(imgDoc.Digest, 1, int64(tagCnt))
 			if err != nil {
-				myutils.Logger.Error(fmt.Sprintf("find tags for repository %s/%s in MongoDB page: %d, pagesize: %d, got error: %s", repoDoc.Namespace, repoDoc.Name, 1, tagCnt, err))
+				myutils.Logger.Error(fmt.Sprintf("find tags for image %s in MongoDB page: %d, pagesize: %d, got error: %s", imgDoc.Digest, 1, tagCnt, err))
 				continue
 			}
 
 			// 生产任务
-			// tag全是从Mongo获取的
 			for _, tagDoc := range tagDocs {
-				// tag已经检查过，跳过当前tag
-				if _, err := myutils.GlobalDBClient.Mongo.FindImgResultByName(tagDoc.RepositoryNamespace, tagDoc.RepositoryName, tagDoc.Name, ""); err == nil {
-					myutils.Logger.Warn("repo:tag already analyzed before:", tagDoc.RepositoryNamespace, "/", tagDoc.RepositoryName, ":", tagDoc.Name)
-					continue
-				}
-
-				digest := ""
-
-				// 对每个tag至多取一个image
-				for _, img := range tagDoc.Images {
-					// 对应的digest已经检查过，跳过
-					if _, err := myutils.GlobalDBClient.Mongo.FindImgResultByDigest(img.Digest); err == nil {
-						continue
-					}
-					// 对应的image在数据库
-					if _, err := myutils.GlobalDBClient.Mongo.FindImageByDigest(img.Digest); err == nil {
-						digest = img.Digest
-						break
-					}
-					// 根据arch大概选一个digest
-					if img.Architecture == "amd64" || img.Architecture == "arm64" || img.Architecture == "unknown" || img.Architecture == "" {
-						digest = img.Digest
-					}
-				}
-
-				if digest != "" {
+				if imgDoc.Digest != "" {
 					jobCh <- job{
-						name:    fmt.Sprintf("%s/%s:%s@%s", repoDoc.Namespace, repoDoc.Name, tagDoc.Name, digest),
+						name:    fmt.Sprintf("%s/%s:%s@%s", tagDoc.RepositoryNamespace, tagDoc.RepositoryName, tagDoc.Name, imgDoc.Digest),
 						partial: partial,
 					}
 					generatedWorks++
@@ -107,8 +151,8 @@ func jobGeneratorSupplement(page int64, pageSize int64, tagCnt int, partial bool
 			}
 		}
 
-		fmt.Printf("[%s] generatied all job for repo page: %d, page_size: %d, generated works: %d\n", myutils.GetLocalNowTimeStr(), repoPage, pageSize, generatedWorks)
-		repoPage++
+		fmt.Printf("[%s] generatied all job for image page: %d, page_size: %d, generated works: %d\n", myutils.GetLocalNowTimeStr(), imgPage, pageSize, generatedWorks)
+		imgPage++
 	}
 }
 

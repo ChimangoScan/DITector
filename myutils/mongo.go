@@ -863,7 +863,17 @@ func (m *MyMongo) FindImgResultByTextPaged(search string, page, pageSize int64) 
 	res := make([]*ImageResult, 0)
 
 	filter := bson.D{{"$text", bson.D{{"$search", search}}}}
-	err := m.ImgResultColl.FindOne(context.TODO(), filter).Decode(res)
+	optLimit := options.Find().SetSkip((page - 1) * pageSize).SetLimit(pageSize)
+
+	cursor, err := m.ImgResultColl.Find(context.TODO(), filter, optLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	if err = cursor.All(context.TODO(), &res); err != nil {
+		return nil, err
+	}
 
 	return res, err
 }
