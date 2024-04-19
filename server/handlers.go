@@ -137,8 +137,8 @@ func handleTagsSearch() func(c *gin.Context) {
 
 func handleImagesSearch() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST")
+		// c.Header("Access-Control-Allow-Origin", "*")
+		// c.Header("Access-Control-Allow-Methods", "GET, POST")
 
 		search := c.DefaultQuery("search", "")
 		pageStr := c.DefaultQuery("page", "1")
@@ -197,8 +197,8 @@ func handleImagesSearch() func(c *gin.Context) {
 
 func handleResultsSearch() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST")
+		// c.Header("Access-Control-Allow-Origin", "*")
+		// c.Header("Access-Control-Allow-Methods", "GET, POST")
 
 		repoNamespace := c.DefaultQuery("repo_namespace", "")
 		repoName := c.DefaultQuery("repo_name", "")
@@ -249,8 +249,8 @@ func handleResultsSearch() func(c *gin.Context) {
 
 func handleResultSearch() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST")
+		// c.Header("Access-Control-Allow-Origin", "*")
+		// c.Header("Access-Control-Allow-Methods", "GET, POST")
 
 		repoNamespace := c.DefaultQuery("repo_namespace", "")
 		repoName := c.DefaultQuery("repo_name", "")
