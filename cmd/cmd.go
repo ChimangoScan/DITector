@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/Musso12138/docker-scan/analyzer"
 	"github.com/Musso12138/docker-scan/buildgraph"
@@ -12,6 +13,7 @@ import (
 	"github.com/Musso12138/docker-scan/scripts"
 	"github.com/Musso12138/docker-scan/server"
 	"github.com/spf13/cobra"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 var logLevelStr string
@@ -46,8 +48,26 @@ var RootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// 仅用作测试
 		myutils.Logger.Info("start test")
+		beginTime := time.Now()
+
+		filter := bson.M{"namespace": "library", "repository_name": "bash", "tag_name": "5.2"}
+		qb, _ := json.Marshal(filter)
+		qs := string(qb)
+		fmt.Println(qs)
+
+		if err := scripts.ExportMongoDocJSON(
+			myutils.GlobalConfig.MongoConfig.URI,
+			myutils.GlobalConfig.MongoConfig.Database,
+			myutils.GlobalConfig.MongoConfig.Collections.ImageResults,
+			qs,
+			"test_exported.json"); err != nil {
+			fmt.Println("export image results of image failed with:", err.Error())
+		} else {
+			fmt.Println("export image results of image success")
+		}
 
 		myutils.Logger.Info("finish test")
+		fmt.Println("time used:", time.Since(beginTime))
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// 所有命令退出前的清理工作
@@ -195,6 +215,13 @@ var executeCmd = &cobra.Command{
 			if err != nil {
 				log.Fatalln("supplement-image-analysis got error:", err)
 			}
+		case "export-mongo-result-docs":
+			file, _ := cmd.Flags().GetString("file")
+			output, _ := cmd.Flags().GetString("output")
+			err := scripts.ExportImgResultsJSON(file, output)
+			if err != nil {
+				log.Fatalln("export-mongo-result-docs got error:", err)
+			}
 		}
 	},
 }
@@ -225,6 +252,7 @@ func init() {
 	executeCmd.Flags().String("script", "", "execute custom script, including: batch-analyze, analyze-threshold, analyze-all")
 	executeCmd.Flags().Bool("partial", false, "only analyze metadata of the Docker images")
 	executeCmd.Flags().StringP("file", "f", "", "input file for scripts, like batch-analyze")
+	executeCmd.Flags().StringP("output", "o", "", "output file for scripts")
 	executeCmd.Flags().Int64("threshold", 1000000, "pull_count threshold to analyze an image")
 	executeCmd.Flags().Int("tags", 3, "the top tag-num recently updated tags to analyze")
 	executeCmd.Flags().Int64("page", 1, "start page for analyzing multiple repos from MongoDB")
