@@ -15,6 +15,15 @@ var DefaultAnalyzer *ImageAnalyzer
 var DefaultAnalyzerE error
 var GlobalDockerClient, _ = client.NewClientWithOpts(client.FromEnv)
 
+// AnalyzeImagePartialByName analyzes image partially, currently only metadata.
+func AnalyzeImagePartialByName(name string) (*myutils.ImageResult, error) {
+	if DefaultAnalyzerE != nil {
+		return nil, fmt.Errorf("create ImageAnalyzer failed with: %s", DefaultAnalyzerE)
+	}
+
+	return DefaultAnalyzer.AnalyzeImagePartialByName(name)
+}
+
 // AnalyzeImageByName analyzes image totally, including metadata, configuration, content of the image.
 func AnalyzeImageByName(name string, delFlag bool) (*myutils.ImageResult, error) {
 	if DefaultAnalyzerE != nil {
@@ -24,13 +33,13 @@ func AnalyzeImageByName(name string, delFlag bool) (*myutils.ImageResult, error)
 	return DefaultAnalyzer.AnalyzeImageByName(name, delFlag)
 }
 
-// AnalyzeImagePartialByName analyzes image partially, currently only metadata.
-func AnalyzeImagePartialByName(name string) (*myutils.ImageResult, error) {
+// AnalyzeImageVulByName analyzes image only to detect CVE vulnerabilities.
+func AnalyzeImageVulByName(name string, delFlag bool) (*myutils.ImageResult, error) {
 	if DefaultAnalyzerE != nil {
 		return nil, fmt.Errorf("create ImageAnalyzer failed with: %s", DefaultAnalyzerE)
 	}
 
-	return DefaultAnalyzer.AnalyzeImagePartialByName(name)
+	return DefaultAnalyzer.AnalyzeImageVulByName(name, delFlag)
 }
 
 // AnalyzeImagePartialByName analyzes image partially by name, including only the metadata.
@@ -333,6 +342,87 @@ func (analyzer *ImageAnalyzer) AnalyzeImageByName(name string, delFlag bool) (*m
 
 	ci.wg.Wait()
 	myutils.Logger.Info("AnalyzeImage", name, "succeeded")
+	return res, nil
+}
+
+// AnalyzeImageVulByName 用于分析结果中不包含漏洞的镜像，并补充扫描到的漏洞信息
+func (analyzer *ImageAnalyzer) AnalyzeImageVulByName(name string, delFlag bool) (*myutils.ImageResult, error) {
+	beginTime := time.Now()
+	beginTimeStr := myutils.GetLocalNowTimeStr()
+
+	// 创建新镜像信息
+	ci, err := NewCurrentImage(name)
+	if err != nil {
+		myutils.Logger.Error("create CurrentImage for image", name, "failed with:", err.Error())
+		return nil, err
+	}
+
+	// 下载并解析镜像信息
+	// ci.ParseFromFile中涉及WaitGroup Add，后续返回前需要Wait
+	if err = ci.ParseFromFile(); err != nil {
+		myutils.Logger.Error("parse image", name, "failed with:", err.Error())
+		ci.wg.Wait()
+		return nil, err
+	}
+
+	// 创建结果对象
+	analyzeBeginTime := time.Now()
+	res := CurrentImageToImageResult(ci)
+	res.LastAnalyzed = beginTimeStr
+
+	// 分析镜像内容信息
+	contentIs, err := analyzer.analyzeContentVul(ci, res)
+	if err != nil {
+		ci.wg.Wait()
+		return nil, err
+	}
+	res.ContentAnalyzed = true
+	res.ContentResult = contentIs
+
+	// 收尾赋值工作
+	res.TotalTime = time.Since(beginTime).String()
+	res.AnalyzeTime = time.Since(analyzeBeginTime).String()
+
+	if myutils.GlobalDBClient.MongoFlag {
+		go func(imgRes *myutils.ImageResult) {
+			if e := myutils.GlobalDBClient.Mongo.UpdateImgResultVul(imgRes); e != nil {
+				myutils.Logger.Error("update content_result.vulnerabilities of ImageResult", imgRes.Name, imgRes.Digest, "failed with:", e.Error())
+			}
+		}(res)
+	}
+
+	// 结束时删除一切解压内容
+	//ci.wg.Add(1)
+	go func(dir string) {
+		//defer ci.wg.Done()
+		e := os.RemoveAll(dir)
+		if e != nil {
+			myutils.Logger.Error("remove all from dir", dir, "failed with:", e.Error())
+		}
+	}(ci.imgFilepath)
+
+	//ci.wg.Add(1)
+	go func(tarFilepath string) {
+		//defer ci.wg.Done()
+		e := os.RemoveAll(tarFilepath)
+		if e != nil {
+			myutils.Logger.Error("remove all from file", tarFilepath, "failed with:", e.Error())
+		}
+	}(ci.imgTarFile)
+
+	if delFlag {
+		//ci.wg.Add(1)
+		go func(name string) {
+			//defer ci.wg.Done()
+			_, e := GlobalDockerClient.ImageRemove(context.TODO(), name, types.ImageRemoveOptions{})
+			if e != nil {
+				myutils.Logger.Error("remove image", name, "from Docker failed with:", e.Error())
+			}
+		}(name)
+	}
+
+	ci.wg.Wait()
+	myutils.Logger.Info("AnalyzeImageVulByName", name, "succeeded")
 	return res, nil
 }
 

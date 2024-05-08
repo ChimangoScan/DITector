@@ -208,6 +208,77 @@ func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.Imag
 	return res, nil
 }
 
+// analyzeContentVul 仅用于逐层分析镜像中包含的软件漏洞
+func (analyzer *ImageAnalyzer) analyzeContentVul(ci *CurrentImage, ir *myutils.ImageResult) (*myutils.ContentResult, error) {
+	res := myutils.NewContentResult()
+	fileWithIssues := make(map[string]bool)
+
+	// 逐层分析layer内容，写入对应LayerResult
+	for _, ld := range ci.layerWithContentList {
+		layerRes, fromMongo, err, layerGotErr := analyzer.analyzeLayer(ci.layerInfoMap[ld], fileWithIssues, map[string]struct{}{})
+		if err != nil {
+			myutils.Logger.Error("analyze layer", ci.layerInfoMap[ld].digest, "layer dir path", ci.layerInfoMap[ld].localFilePath, "for vulnerabilities failed with:", err.Error())
+			continue
+		}
+		ir.LayerResults[ld] = layerRes
+
+		// 新分析的结果存入数据库，只更新vulnerabilities字段
+		if !fromMongo && !layerGotErr {
+			if myutils.GlobalDBClient.MongoFlag {
+				ci.wg.Add(1)
+				go func(layerRes *myutils.LayerResult) {
+					ci.wg.Done()
+					if e := myutils.GlobalDBClient.Mongo.UpdateLayerResult(layerRes); e != nil {
+						myutils.Logger.Error("update LayerResult", layerRes.Digest, "failed with:", e.Error())
+					}
+				}(layerRes)
+			}
+		}
+
+		// 记录检测过程中出错的layer digest列表
+		if layerGotErr {
+			res.LayersGotErr = append(res.LayersGotErr, ld)
+		}
+
+		// 把有问题的结果文件放入当前状态表
+		for _, vulnInfo := range layerRes.Vulnerabilities {
+			fileWithIssues[vulnInfo.Path] = false
+		}
+	}
+
+	// 汇总各层结果，存入全局表中（当前状态）
+	fileAdded := make(map[string]int)
+	for i := len(ir.Layers) - 1; i >= 0; i-- {
+		layerDigest := ir.Layers[i]
+		// 其他问题从顶层到底层添加，存在覆盖问题
+		// 软件漏洞
+		for _, vulnInfo := range ir.LayerResults[layerDigest].Vulnerabilities {
+			// 不存在问题（已被修复）的文件不计入
+			if _, issued := fileWithIssues[vulnInfo.Path]; !issued {
+				continue
+			}
+			// 同层同一文件问题不覆盖（一个应用文件路径对应多个漏洞）
+			// 不同层同一文件问题覆盖
+			if pre, ok := fileAdded[vulnInfo.Path]; ok && pre != i {
+				continue
+			}
+			res.Vulnerabilities = append(res.Vulnerabilities, vulnInfo)
+			fileAdded[vulnInfo.Path] = i
+		}
+
+		// SCA结果
+		for _, appInfo := range ir.LayerResults[layerDigest].Components {
+			if pre, ok := fileAdded[appInfo.Filepath]; ok && pre != i {
+				continue
+			}
+			res.Components = append(res.Components, appInfo)
+			fileAdded[appInfo.Filepath] = i
+		}
+	}
+
+	return res, nil
+}
+
 // analyzeLayer traverses and analyzes files under inputted layerDir,
 // and writes results directly to layerResult.
 func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map[string]bool, defaultExecFiles map[string]struct{}) (*myutils.LayerResult, bool, error, bool) {
@@ -331,6 +402,98 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 	}
 
 	wg.Wait()
+
+	// 添加层检测s
+	layerAnalyzeTime := time.Since(layerBeginTime).String()
+	res.AnalyzeTime = layerAnalyzeTime
+	res.LastAnalyzed = lastAnalyzed
+
+	return res, false, err, layerGotErr
+}
+
+// analyzeLayerVul 仅用于分析一个layer中的漏洞问题，暂时用不上，因为以前出错的layer注定不存在于layer_results表中
+func (analyzer *ImageAnalyzer) analyzeLayerVul(layer *layerInfo, fileWithIssues map[string]bool) (*myutils.LayerResult, bool, error, bool) {
+	// 数据库在线，检查是否已被分析
+	if myutils.GlobalDBClient.MongoFlag {
+		if lr, err := myutils.GlobalDBClient.Mongo.FindLayerResultByDigest(layer.digest); err == nil {
+			return lr, true, nil, false
+		}
+	}
+
+	layerBeginTime := time.Now()
+	lastAnalyzed := myutils.GetLocalNowTimeStr()
+	var err error
+	var layerGotErr bool
+
+	res := myutils.NewLayerResult()
+	res.Instruction = layer.instruction
+	res.Size = layer.size
+	res.Digest = layer.digest
+
+	// SCA: 调用asky对本地层文件做SCA和漏洞匹配
+	func(layerRootDir, layerDir string, layerRes *myutils.LayerResult, gotErrFlag *bool) {
+		report, err := scaVul(layerDir, path.Join(layerRootDir, "sca.json"))
+		if err != nil {
+			myutils.Logger.Error("sca and matches vuln for filepath", layerDir, "failed with:", err.Error())
+			*gotErrFlag = true
+			return
+		}
+
+		// component加入LayerResult
+		componentList := make([]*myutils.Component, 0)
+		for _, comp := range report.Data.ReportData.Component {
+			relPath := getRelAbsPath(layerDir, comp.FilePath)
+			componentList = append(componentList, &myutils.Component{
+				Filename:    comp.FileName,
+				Codetype:    comp.Codetype,
+				Filepath:    relPath,
+				FileSha1:    comp.FileSha1,
+				FileMd5:     comp.FileMd5,
+				FileVersion: comp.FileVersion,
+				OpenSource:  comp.OpenSource,
+			})
+		}
+
+		// 形成LayerResult的漏洞列表
+		vulnList := make([]*myutils.Vulnerability, 0)
+		for _, vuln := range report.Data.ReportData.VulnInfo {
+			relPath := getRelAbsPath(layerDir, vuln.FilePath)
+			affectFile := make([]string, len(vuln.AffectFile))
+			for i, p := range vuln.AffectFile {
+				tmpRel := getRelAbsPath(layerDir, p)
+				affectFile[i] = tmpRel
+			}
+			cvss, _ := strconv.ParseFloat(vuln.CVSSScore, 64)
+
+			vulnList = append(vulnList, &myutils.Vulnerability{
+				Type:        myutils.IssueType.Vulnerability,
+				Name:        vuln.CVEID,
+				Part:        myutils.IssuePart.Content,
+				Path:        relPath,
+				LayerDigest: layer.digest,
+
+				CVEID:           vuln.CVEID,
+				Filename:        vuln.FileName,
+				ProductName:     vuln.ProductName,
+				VendorName:      vuln.VendorName,
+				Version:         vuln.Version,
+				VulnType:        vuln.VulnType,
+				ThrType:         vuln.ThrType,
+				PublishedTime:   vuln.PublishedTime,
+				Description:     vuln.Description,
+				Severity:        vuln.Severity,
+				CVSSScore:       cvss,
+				AffectComponent: vuln.AffectComponent,
+				AffectFile:      affectFile,
+			})
+		}
+
+		// 没有竞争，无需上锁直接写
+		layerRes.Total = report.Data.ReportData.Total
+		layerRes.ComponentNum = report.Data.ReportData.ComponentNum
+		layerRes.Components = componentList
+		layerRes.Vulnerabilities = vulnList
+	}(layer.localRootFilePath, layer.localFilePath, res, &layerGotErr)
 
 	// 添加层检测s
 	layerAnalyzeTime := time.Since(layerBeginTime).String()

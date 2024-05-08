@@ -47,7 +47,8 @@ func TestParseMetadataFromAPI(t *testing.T) {
 
 func TestPullSaveExtractImage(t *testing.T) {
 
-	ci, err := NewCurrentImage("library/groovy:latest")
+	// ci, err := NewCurrentImage("library/groovy:latest")
+	ci, err := NewCurrentImage("library/sonarqube:enterprise")
 	if err != nil {
 		log.Fatalln("create new current image got error:", err)
 	}

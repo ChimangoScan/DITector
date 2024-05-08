@@ -152,6 +152,12 @@ var executeCmd = &cobra.Command{
 			if err != nil {
 				log.Fatalln("batch-analyze file", file, "got error:", err)
 			}
+		case "batch-analyze-vul":
+			file, _ := cmd.Flags().GetString("file")
+			err := scripts.BatchAnalyzeVulByName(file)
+			if err != nil {
+				log.Fatalln("batch-analyze-vul file", file, "got error:", err)
+			}
 		case "analyze-threshold":
 			threshold, _ := cmd.Flags().GetInt64("threshold")
 			tagNum, _ := cmd.Flags().GetInt("tags")

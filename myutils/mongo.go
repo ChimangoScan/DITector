@@ -755,6 +755,25 @@ func (m *MyMongo) UpdateImgResult(imgRes *ImageResult) error {
 	return err
 }
 
+// 仅用于更新image结果中的content_result.vulnerabilities字段
+func (m *MyMongo) UpdateImgResultVul(imgRes *ImageResult) error {
+	filter := bson.M{
+		"namespace":       imgRes.Namespace,
+		"repository_name": imgRes.RepoName,
+		"tag_name":        imgRes.TagName,
+		"digest":          imgRes.Digest,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"content_result.vulnerabilities": imgRes.ContentResult.Vulnerabilities,
+		},
+	}
+	opts := options.Update()
+
+	_, err := m.ImgResultColl.UpdateOne(context.TODO(), filter, update, opts)
+	return err
+}
+
 func (m *MyMongo) FindImgResultByDigest(digest string) (*ImageResult, error) {
 	res := new(ImageResult)
 
@@ -897,6 +916,21 @@ func (m *MyMongo) UpdateLayerResult(layerRes *LayerResult) error {
 		"$set": layerRes,
 	}
 	opts := options.Update().SetUpsert(true)
+
+	_, err := m.LayerResultColl.UpdateOne(context.TODO(), filter, update, opts)
+	return err
+}
+
+func (m *MyMongo) UpdateLayerResultVul(layerRes *LayerResult) error {
+	filter := bson.M{
+		"digest": layerRes.Digest,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"vulnerabilities": layerRes.Vulnerabilities,
+		},
+	}
+	opts := options.Update()
 
 	_, err := m.LayerResultColl.UpdateOne(context.TODO(), filter, update, opts)
 	return err
