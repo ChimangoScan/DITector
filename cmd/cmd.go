@@ -49,6 +49,8 @@ var RootCmd = &cobra.Command{
 		myutils.Logger.Info("start test")
 		beginTime := time.Now()
 
+		fmt.Println(myutils.GlobalDBClient.ES.FindImgResultByTextPaged("GitHub", 1, 3))
+
 		myutils.Logger.Info("finish test")
 		fmt.Println("time used:", time.Since(beginTime))
 	},

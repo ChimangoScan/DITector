@@ -262,6 +262,14 @@ type MaliciousFile struct {
 	SandboxScore    float64 `json:"sandbox_score" bson:"sandbox_score"`
 }
 
+type ImgResultUniqueField struct {
+	Registry  string `json:"registry" bson:"registry"`
+	Namespace string `json:"namespace" bson:"namespace"`
+	RepoName  string `json:"repository_name" bson:"repository_name"`
+	TagName   string `json:"tag_name" bson:"tag_name"`
+	Digest    string `json:"digest" bson:"digest"`
+}
+
 // Deprecated: 不统一实现了
 //// Issue 表示一条发现的问题
 //// TODO: 需要考虑怎么统一所有检测的结果

@@ -56,6 +56,12 @@ var GlobalConfig struct {
 		Neo4jUsername string `yaml:"neo4j_username"`
 		Neo4jPassword string `yaml:"neo4j_password"`
 	} `yaml:"neo4j_config"`
+	ESConfig struct {
+		ESURI       string `yaml:"es_uri"`
+		ESUsername  string `yaml:"es_username"`
+		ESPassword  string `yaml:"es_password"`
+		ESIndexName string `yaml:"es_index"`
+	} `yaml:"es_config"`
 	RulesConfig struct {
 		SecretRulesFile         string `yaml:"secret_rules_file"`
 		SensitiveParamRulesFile string `yaml:"sensitive_param_rules_file"`
@@ -76,6 +82,8 @@ var GlobalDBClient struct {
 	MongoFlag bool // 标识Mongo是否成功连接
 	Neo4j     *MyNeo4j
 	Neo4jFlag bool // 标识Neo4j是否成功连接
+	ES        *MyES
+	ESFlag    bool // 标识elasticsearch是否成功连接
 }
 
 func LoadConfigFromFile(configFilepath string, logLevel int) {
@@ -165,6 +173,16 @@ func connectDBs() {
 	} else {
 		GlobalDBClient.Neo4jFlag = true
 		fmt.Println("[+] Connect to Neo4j")
+	}
+
+	// 连接Elasticsearch
+	if GlobalDBClient.ES, err = NewESGlobalConfig(); err != nil {
+		GlobalDBClient.ESFlag = false
+		Logger.Error("connect to Elasticsearch failed with:", err.Error())
+		fmt.Println("[-] Connect to Elasticsearch failed")
+	} else {
+		GlobalDBClient.ESFlag = true
+		fmt.Println("[+] Connect to Elasticsearch")
 	}
 }
 

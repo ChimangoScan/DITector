@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -219,15 +220,30 @@ func handleResultsSearch() func(c *gin.Context) {
 		}
 
 		var totalCnt int64
-		var results []*myutils.ImageResult
+		var results = []*myutils.ImageResult{}
 
 		// 有search就用text查攻击向量，没有就根据repo查找
 		if search == "" {
 			totalCnt, _ = myutils.GlobalDBClient.Mongo.CountImgResultsByName(repoNamespace, repoName, tagName, imgDigest)
 			results, err = myutils.GlobalDBClient.Mongo.FindImgResultsByNamePaged(repoNamespace, repoName, tagName, imgDigest, page, pageSize)
 		} else {
-			totalCnt, _ = myutils.GlobalDBClient.Mongo.CountImgResByText(search)
-			results, err = myutils.GlobalDBClient.Mongo.FindImgResultByTextPaged(search, page, pageSize)
+			var esRes *myutils.MyESImgResult
+			esRes, err = myutils.GlobalDBClient.ES.FindImgResultByTextPaged(search, page, pageSize)
+			if err == nil {
+				totalCnt = int64(esRes.Total)
+				for _, uniqueField := range esRes.UniqueField {
+					var imgRes *myutils.ImageResult
+					imgRes, err = myutils.GlobalDBClient.Mongo.FindImgResultByName(uniqueField.Namespace,
+						uniqueField.RepoName, uniqueField.TagName, uniqueField.Digest)
+					if err != nil {
+						myutils.Logger.Error(fmt.Sprintf("wtf??? find img result of %s/%s:%s@%s in mongo failed with: %s",
+							uniqueField.Namespace, uniqueField.RepoName, uniqueField.TagName, uniqueField.Digest, err))
+						break
+					}
+
+					results = append(results, imgRes)
+				}
+			}
 		}
 
 		if err != nil {
