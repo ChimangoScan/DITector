@@ -19,6 +19,7 @@ func StartServer(port string) {
 		})
 	})
 	router.POST("/login", handleUserLogin())
+	router.POST("/register", handleUserRegister())
 
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

@@ -74,6 +74,9 @@ var GlobalConfig struct {
 		Filepath string `yaml:"filepath"`
 		Verify   bool   `yaml:"verify"`
 	} `yaml:"trufflehog_config"`
+	NSSLLicenseConfig struct {
+		Filepath string `yaml:"filepath"`
+	} `yaml:"nssl_license_config"`
 }
 
 // GlobalDBClient 用于维护全局所有模块的数据库client连接

@@ -80,6 +80,10 @@ func NewMongo(uri, database, repositories, tags, images, imgResults, layerResult
 		}
 	}
 
+	if err = mymongo.createUserCollIndexes(); err != nil {
+		return mymongo, err
+	}
+
 	return mymongo, nil
 }
 
@@ -316,6 +320,45 @@ func (m *MyMongo) createLayerResultCollIndexes() (err error) {
 	model := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "digest", Value: 1},
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	_, err = indexView.CreateOne(context.Background(), model)
+	if err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return
+		}
+	}
+
+	if mongo.IsDuplicateKeyError(err) {
+		err = nil
+	}
+	return
+}
+
+func (m *MyMongo) createUserCollIndexes() (err error) {
+	indexView := m.LayerResultColl.Indexes()
+
+	var model mongo.IndexModel
+
+	// index: username
+	model = mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "username", Value: 1},
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	_, err = indexView.CreateOne(context.Background(), model)
+	if err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return
+		}
+	}
+
+	// index: uid
+	model = mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "uid", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
 	}
@@ -967,6 +1010,36 @@ func (m *MyMongo) FindUserByKeyword(keyMap map[string]any) (*User, error) {
 }
 
 // TODO: 以后再加修改密码、新增用户、修改状态什么的
+func (m *MyMongo) InsertUser(username, password, lastname, firstname, email, phone string) error {
+	var err error
+
+	insert := bson.M{
+		"username":          username,
+		"password":          password,
+		"fullname":          firstname + lastname,
+		"firstname":         firstname,
+		"lastname":          lastname,
+		"email":             email,
+		"phone":             phone,
+		"registration_time": GetLocalNowTime(),
+		"status":            1,
+		"type":              1,
+	}
+
+	// 尝试三次，基本是uid冲突，三次还不过就太倒霉了。。。
+	for i := 0; i < 3; i++ {
+		insert["uid"] = GetRandStr(32)
+
+		_, err = m.UserColl.InsertOne(context.Background(), insert)
+		if err == nil {
+			return nil
+		} else {
+			continue
+		}
+	}
+
+	return err
+}
 
 func (m *MyMongo) UpdateUserLogin(keyMap map[string]any, loginTime time.Time) error {
 	if len(keyMap) == 0 {
