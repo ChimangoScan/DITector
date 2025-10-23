@@ -222,18 +222,6 @@ func (rs RecordDownSlice) CheckNodeId(nodeId string) bool {
 	return false
 }
 
-type RecordWithNodeID struct {
-	Namespace            string `json:"namespace"`
-	RepositoryName       string `json:"repository_name"`
-	TagName              string `json:"tag_name"`
-	ImageDigest          string `json:"image_digest"`
-	NodeId               string
-	UpstreamImageCount   int      `json:"upstream_image_count"`
-	UpstreamImageList    []string `json:"upstream_image_list"`
-	DownstreamImageCount int      `json:"downstream_image_count"`
-	DownstreamImageList  []string `json:"downstream_image_list"`
-}
-
 // StatisticRepositoriesDependentWeights calculates
 // dependent weight statistics of each repository
 // by read and process file /data/docker-crawler/results/dependent-weights/dependent-weights.txt
