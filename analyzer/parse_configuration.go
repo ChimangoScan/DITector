@@ -100,7 +100,5 @@ func (currI *CurrentImage) parseConfigurationFromDockerEnv() error {
 	//	currI.configuration = &conf
 	//}
 
-	// TODO: 解析镜像的配置信息
-
 	return nil
 }

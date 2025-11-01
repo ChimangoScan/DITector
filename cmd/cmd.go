@@ -7,11 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/Musso12138/docker-scan/analyzer"
-	"github.com/Musso12138/docker-scan/buildgraph"
-	"github.com/Musso12138/docker-scan/myutils"
-	"github.com/Musso12138/docker-scan/scripts"
-	"github.com/Musso12138/docker-scan/server"
+	"github.com/NSSL-SJTU/DITector/analyzer"
+	"github.com/NSSL-SJTU/DITector/buildgraph"
+	"github.com/NSSL-SJTU/DITector/myutils"
+	"github.com/NSSL-SJTU/DITector/scripts"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +49,7 @@ var RootCmd = &cobra.Command{
 		myutils.Logger.Info("start test")
 		beginTime := time.Now()
 
-		fmt.Println(myutils.GlobalDBClient.ES.FindImgResultByTextPaged("GitHub", 1, 3))
+		// Test code here
 
 		myutils.Logger.Info("finish test")
 		fmt.Println("time used:", time.Since(beginTime))
@@ -145,35 +144,12 @@ var analyzeCmd = &cobra.Command{
 	},
 }
 
-var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "start backend server",
-	Run: func(cmd *cobra.Command, args []string) {
-		port, _ := cmd.Flags().GetString("port")
-		server.StartServer(port)
-		fmt.Println("start docker-scan backend server at port:", port)
-	},
-}
-
 var executeCmd = &cobra.Command{
 	Use:   "execute",
 	Short: "execute custom scripts",
 	Run: func(cmd *cobra.Command, args []string) {
 		script, _ := cmd.Flags().GetString("script")
 		switch script {
-		case "batch-analyze":
-			file, _ := cmd.Flags().GetString("file")
-			partial, _ := cmd.Flags().GetBool("partial")
-			err := scripts.BatchAnalyzeByName(file, partial)
-			if err != nil {
-				log.Fatalln("batch-analyze file", file, "got error:", err)
-			}
-		case "batch-analyze-vul":
-			file, _ := cmd.Flags().GetString("file")
-			err := scripts.BatchAnalyzeVulByName(file)
-			if err != nil {
-				log.Fatalln("batch-analyze-vul file", file, "got error:", err)
-			}
 		case "analyze-threshold":
 			threshold, _ := cmd.Flags().GetInt64("threshold")
 			tagNum, _ := cmd.Flags().GetInt("tags")
@@ -219,16 +195,6 @@ var executeCmd = &cobra.Command{
 			if err != nil {
 				log.Fatalln("count-images-with-downstream got error:", err)
 			}
-		case "supplement-image-analysis":
-			page, _ := cmd.Flags().GetInt64("page")
-			pageSize, _ := cmd.Flags().GetInt64("page_size")
-			tagCnt, _ := cmd.Flags().GetInt("tags")
-			partial, _ := cmd.Flags().GetBool("partial")
-			fmt.Println(myutils.GetLocalNowTimeStr(), "start to execute, script:", script, ", page:", page, ", page_size:", pageSize, ", tags:", tagCnt, ", partial:", partial)
-			err := scripts.SupplementImageAnalysis(page, pageSize, tagCnt, partial)
-			if err != nil {
-				log.Fatalln("supplement-image-analysis got error:", err)
-			}
 		case "export-mongo-result-docs":
 			file, _ := cmd.Flags().GetString("file")
 			output, _ := cmd.Flags().GetString("output")
@@ -243,14 +209,6 @@ var executeCmd = &cobra.Command{
 			err := scripts.CheckSameNodeAsHighDependentImages(file, output)
 			if err != nil {
 				log.Fatalln("check-same-node-as-high-dependent-images got error:", err)
-			}
-		case "find-earliest-updated-images":
-			file, _ := cmd.Flags().GetString("file")
-			output, _ := cmd.Flags().GetString("output")
-			fmt.Printf("begin to find-earliest-updated-images with arguements, file: %s, output: %s\n", file, output)
-			err := scripts.FindEarliestUpdatedImgs(file, output)
-			if err != nil {
-				log.Fatalln("find-earliest-updated-images got error:", err)
 			}
 		}
 	},
@@ -278,9 +236,6 @@ func init() {
 	analyzeCmd.Flags().Bool("json", true, "output in JSON")
 	analyzeCmd.Flags().StringP("output", "o", fmt.Sprintf("%s_result.json", myutils.GetLocalNowTimeNoSpace()), "analysis result output filepath")
 
-	// startCmd
-	startCmd.Flags().StringP("port", "p", "23434", "port listening by backend server")
-
 	// executeCmd
 	executeCmd.Flags().String("script", "", "execute custom script, including: batch-analyze, analyze-threshold, analyze-all")
 	executeCmd.Flags().Bool("partial", false, "only analyze metadata of the Docker images")
@@ -298,7 +253,6 @@ func init() {
 		calculateCmd,
 		buildCmd,
 		analyzeCmd,
-		startCmd,
 		executeCmd,
 	)
 }

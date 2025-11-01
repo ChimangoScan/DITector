@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 func TestParseMetadataFromAPI(t *testing.T) {

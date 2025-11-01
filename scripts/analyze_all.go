@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Musso12138/docker-scan/analyzer"
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/analyzer"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 type job struct {

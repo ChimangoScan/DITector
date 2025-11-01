@@ -125,55 +125,6 @@ func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(imgName string, image *Image) {
 	}
 }
 
-//// InsertImageToNeo4jOld Deprecated: 根据爬虫json格式结果将镜像元数据存储到neo4j数据库中
-//// 没有考虑未产生文件修改的镜像的层（配置命令）
-//func (neo4jDriver *MyNeo4j) InsertImageToNeo4jOld(image *ImageSource) {
-//	// 创建一个neo4j session
-//	ctx := context.Background()
-//	session := neo4jDriver.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-//	defer session.Close(ctx)
-//
-//	previousHash := ""      // 用于存上一个hash(1-2)
-//	accumulateLayerID := "" // 用于堆1、1-2、1-2-5，方便直接计算hash
-//	accumulateHash := ""    // =hash(accumulateLayerID)，用于存当前hash(1-2-5)
-//
-//	lastLayerIndex := 0 // 仍有文件内容的最顶层在Image.Layers中的index
-//	imageName := image.Namespace + "/" + image.RepositoryName + ":" + image.TagName
-//
-//	for i, _ := range image.Image.Layers {
-//		// 跳过没有文件内容的层
-//		if image.Image.Layers[i].Size == 0 {
-//			continue
-//		}
-//
-//		// 计算hash(1-2-5)，转成string类型
-//		curLayer := image.Image.Layers[i]
-//		layerID := curLayer.Digest
-//		accumulateLayerID += layerID
-//		accumulateHash = Sha256Str(accumulateLayerID)
-//
-//		// 插入层及层间的边
-//		_, err := session.ExecuteWrite(ctx, addNewLayerFunc(ctx, previousHash, accumulateHash, curLayer))
-//		if err != nil {
-//			Logger.Error("Insert", imageName, "layer", layerID, "to neo4j failed with:", err.Error())
-//			fmt.Printf("[ERROR] Insert "+imageName+" layer "+layerID+" to neo4j failed with: %s\n", err)
-//			break
-//		}
-//
-//		// 更新previousHash，下一轮插入节点的父节点ID应为previousHash
-//		previousHash = accumulateHash
-//		// 记录最后一层的index，
-//		lastLayerIndex = i
-//	}
-//
-//	// 需要将image信息加入到节点属性中
-//	_, err := session.ExecuteWrite(ctx, addImageToLayerFunc(ctx, imageName, accumulateHash))
-//	if err != nil {
-//		Logger.Error(fmt.Sprintf("Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s", err))
-//		fmt.Printf("[ERROR] Insert image "+image.Namespace+"/"+image.RepositoryName+":"+image.TagName+" of layer "+strconv.Itoa(lastLayerIndex)+" to neo4j failed with: %s\n", err)
-//	}
-//}
-
 // addNewLayerFunc 返回可用于session.ExecuteWrite的func，将Layer节点及节点间的边插入neo4j
 func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Layer) neo4j.ManagedTransactionWork {
 	// 节点的两种label
@@ -682,22 +633,6 @@ func CalculateImageNodeId(img *Image) string {
 	}
 
 	return preId
-}
-
-// CalculateImageNodeIdOld 用于计算镜像顶层节点所在的node id，未考虑镜像中的配置层，为旧版依赖图实现
-// CalculateImageNodeIdOld calculates node-id of top layer
-// (with real file contents) in the image layer-to-layer chain.
-func CalculateImageNodeIdOld(image *ImageOld) string {
-	accumulateLayerID := ""
-	for _, layer := range image.Layers {
-		if layer.Size == 0 {
-			continue
-		}
-		accumulateLayerID += layer.Digest
-	}
-	accumulateHash := Sha256Str(accumulateLayerID)
-
-	return accumulateHash
 }
 
 func IsLayerNotScannedError(err error) bool {

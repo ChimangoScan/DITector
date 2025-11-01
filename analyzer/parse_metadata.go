@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 var (

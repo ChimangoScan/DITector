@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/myutils"
 	"go.mongodb.org/mongo-driver/bson"
 )
 

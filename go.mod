@@ -1,4 +1,4 @@
-module github.com/Musso12138/docker-scan
+module github.com/NSSL-SJTU/DITector
 
 go 1.20
 

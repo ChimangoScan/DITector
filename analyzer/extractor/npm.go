@@ -8,7 +8,6 @@ import (
 var npmInstallRe = regexp.MustCompile(`(npm\s+install\s+.*?)(?:&&|\n|$)`)
 var npmInstallArgsRe = regexp.MustCompile(`^npm\s+install\s+(.*)`)
 
-// 不完善，很难完善，放弃了，差不多得了
 // 参考npm package spec链接：https://docs.npmjs.com/cli/v8/using-npm/package-spec
 // var npmPackageSpecRe = regexp.MustCompile(`(?:\s+)(?:@[a-z0-9\-][a-z0-9\-._]*/)?[a-z0-9\-][a-z0-9\-._]*(?:@".*?"|@\S+)?`)
 

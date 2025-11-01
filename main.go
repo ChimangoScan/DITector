@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/Musso12138/docker-scan/cmd"
 	"log"
+
+	"github.com/NSSL-SJTU/DITector/cmd"
 )
 
 func main() {

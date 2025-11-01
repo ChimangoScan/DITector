@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/Musso12138/docker-scan/buildgraph"
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/buildgraph"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 type ImageWithUpstream struct {

@@ -70,9 +70,6 @@ type LayerResult struct {
 	Vulnerabilities   []*Vulnerability
 	Misconfigurations []*Misconfiguration
 	MaliciousFiles    []*MaliciousFile
-
-	// 奇安信扫描taskid
-	TaskID string
 }
 
 // InstalledContent 记录layer instruction中通过pip install, npm install, wget下载的内容
@@ -269,23 +266,6 @@ type ImgResultUniqueField struct {
 	TagName   string `json:"tag_name" bson:"tag_name"`
 	Digest    string `json:"digest" bson:"digest"`
 }
-
-// Deprecated: 不统一实现了
-//// Issue 表示一条发现的问题
-//// TODO: 需要考虑怎么统一所有检测的结果
-//type Issue struct {
-//	Type          string  `json:"type"`
-//	Name          string  `json:"name"`
-//	Part          string  `json:"part"` // part of image: metadata, configuration, content
-//	Path          string  `json:"path"`
-//	Sha256        string  `json:"sha256,omitempty"`  // sha256 of file, only for malicious file
-//	Version       string  `json:"version,omitempty"` // version of the product, only for vulnerability
-//	Match         string  `json:"match,omitempty"`
-//	Description   string  `json:"description"`
-//	Severity      string  `json:"severity"`
-//	SeverityScore float64 `json:"severity_score"`
-//	LayerDigest   string  `json:"layer_digest,omitempty"`
-//}
 
 var IssueType = struct {
 	SecretLeakage    string

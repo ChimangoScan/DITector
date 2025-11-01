@@ -1,6 +1,6 @@
 .PHONY: build clean test
 
-BINARY="docker-scan"
+BINARY="ditector"
 
 build:
 	@GOARCH=amd64 go build -o ${BINARY}

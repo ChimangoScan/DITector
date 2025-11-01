@@ -1,6 +1,6 @@
 package analyzer
 
-import "github.com/Musso12138/docker-scan/myutils"
+import "github.com/NSSL-SJTU/DITector/myutils"
 
 func (analyzer *ImageAnalyzer) scanSensitiveParamInString(s string) []*myutils.SensitiveParam {
 	res := make([]*myutils.SensitiveParam, 0)

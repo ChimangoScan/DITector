@@ -1,93 +1,21 @@
 package analyzer
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/Musso12138/docker-scan/analyzer/misconfiguration"
-	"github.com/Musso12138/docker-scan/myutils"
-	"io"
 	"io/fs"
-	"mime/multipart"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
+
+	"github.com/NSSL-SJTU/DITector/analyzer/misconfiguration"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
-// 用于Asky与服务器通信确定任务情况
-type AskYTask struct {
-	Code string       `json:"code"`
-	Data AskYTaskData `json:"data"`
-}
-
-type AskYTaskData struct {
-	TaskID     string `json:"taskid"`
-	FileName   string `json:"fileName"`
-	Md5        string `json:"md5"`
-	Sha1       string `json:"sha1"`
-	UserID     int64  `json:"userId"`
-	Status     string `json:"status"`
-	Descr      string `json:"descr"`
-	CreateDate string `json:"ceateDate"`
-	Flag1      string `json:"flag1"`
-	Flag2      string `json:"flag2"`
-}
-
-// 用于接受服务器返回的SCA和漏洞匹配结果
-type AskYReport struct {
-	Code string   `json:"code"`
-	Data AskYData `json:"data"`
-}
-
-type AskYData struct {
-	ReportData AskYReportData `json:"reportData"`
-}
-
-type AskYReportData struct {
-	Component    []AskYComponent `json:"component"`
-	Total        int             `json:"total"`
-	ComponentNum int             `json:"componentNum"`
-	VulnInfo     []AskYVulnInfo  `json:"vulnInfo"`
-}
-
-type AskYComponent struct {
-	FileName    string `json:"fileName"`
-	Codetype    string `json:"codetype"`
-	FilePath    string `json:"filePath"`
-	FileSha1    string `json:"fileSha1"`
-	FileMd5     string `json:"fileMd5"`
-	FileVersion string `json:"fileVersion"`
-	OpenSource  string `json:"openSource"`
-}
-
-type AskYVulnInfo struct {
-	CVEID           string   `json:"cveID"`
-	FileName        string   `json:"fileName"`
-	VulnName        string   `json:"vlunName"`
-	Description     string   `json:"description"`
-	Severity        string   `json:"severity"`
-	VulnType        string   `json:"vuln_type"`
-	ThrType         string   `json:"ThrType"`
-	ModifiedTime    string   `json:"modified_time"`
-	PublishedTime   string   `json:"published_time"`
-	CVSSScore       string   `json:"cvssScore"`
-	Solution        string   `json:"solution"`
-	FilePath        string   `json:"filePath"`
-	Version         string   `json:"version"`
-	ProductName     string   `json:"productName"`
-	VendorName      string   `json:"vendorName"`
-	AffectComponent []string `json:"affectComponent"`
-	AffectFile      []string `json:"affectFile"`
-}
-
-// 用于奇安信云查的文件信誉结果
 type FileReputation struct {
 	Sha256          string  `json:"sha256"`
 	Level           int     `json:"level"`
@@ -97,6 +25,178 @@ type FileReputation struct {
 	Describe        string  `json:"describe"`
 	MaliciousFamily string  `json:"malicious_family"`
 	SandboxScore    float64 `json:"sandbox_score"`
+}
+
+type AnchoreReport struct {
+	Matches []struct {
+		Vulnerability struct {
+			ID          string   `json:"id"`
+			DataSource  string   `json:"dataSource"`
+			Namespace   string   `json:"namespace"`
+			Severity    string   `json:"severity"`
+			Urls        []string `json:"urls"`
+			Description string   `json:"description"`
+			Cvss        []struct {
+				Source  string `json:"source"`
+				Type    string `json:"type"`
+				Version string `json:"version"`
+				Vector  string `json:"vector"`
+				Metrics struct {
+					BaseScore           float64 `json:"baseScore"`
+					ExploitabilityScore float64 `json:"exploitabilityScore"`
+					ImpactScore         float64 `json:"impactScore"`
+				} `json:"metrics"`
+				VendorMetadata struct {
+				} `json:"vendorMetadata"`
+			} `json:"cvss"`
+			Fix struct {
+				Versions []any  `json:"versions"`
+				State    string `json:"state"`
+			} `json:"fix"`
+			Advisories []any `json:"advisories"`
+		} `json:"vulnerability"`
+		RelatedVulnerabilities []any `json:"relatedVulnerabilities"`
+		MatchDetails           []struct {
+			Type       string `json:"type"`
+			Matcher    string `json:"matcher"`
+			SearchedBy struct {
+				Namespace string   `json:"namespace"`
+				Cpes      []string `json:"cpes"`
+				Package   struct {
+					Name    string `json:"name"`
+					Version string `json:"version"`
+				} `json:"Package"`
+			} `json:"searchedBy"`
+			Found struct {
+				VulnerabilityID   string   `json:"vulnerabilityID"`
+				VersionConstraint string   `json:"versionConstraint"`
+				Cpes              []string `json:"cpes"`
+			} `json:"found"`
+		} `json:"matchDetails"`
+		Artifact struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Version   string `json:"version"`
+			Type      string `json:"type"`
+			Locations []struct {
+				Path string `json:"path"`
+			} `json:"locations"`
+			Language  string   `json:"language"`
+			Licenses  []string `json:"licenses"`
+			Cpes      []string `json:"cpes"`
+			Purl      string   `json:"purl"`
+			Upstreams []struct {
+				Name string `json:"name"`
+			} `json:"upstreams"`
+		} `json:"artifact"`
+	} `json:"matches"`
+	Source struct {
+		Type   string `json:"type"`
+		Target string `json:"target"`
+	} `json:"source"`
+	Distro struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+		IDLike  any    `json:"idLike"`
+	} `json:"distro"`
+	Descriptor struct {
+		Name          string `json:"name"`
+		Version       string `json:"version"`
+		Configuration struct {
+			ConfigPath         string   `json:"configPath"`
+			Verbosity          int      `json:"verbosity"`
+			Output             []string `json:"output"`
+			File               string   `json:"file"`
+			Distro             string   `json:"distro"`
+			AddCpesIfNone      bool     `json:"add-cpes-if-none"`
+			OutputTemplateFile string   `json:"output-template-file"`
+			Quiet              bool     `json:"quiet"`
+			CheckForAppUpdate  bool     `json:"check-for-app-update"`
+			OnlyFixed          bool     `json:"only-fixed"`
+			OnlyNotfixed       bool     `json:"only-notfixed"`
+			Platform           string   `json:"platform"`
+			Search             struct {
+				Scope             string `json:"scope"`
+				UnindexedArchives bool   `json:"unindexed-archives"`
+				IndexedArchives   bool   `json:"indexed-archives"`
+			} `json:"search"`
+			Ignore  any   `json:"ignore"`
+			Exclude []any `json:"exclude"`
+			Db      struct {
+				CacheDir              string `json:"cache-dir"`
+				UpdateURL             string `json:"update-url"`
+				CaCert                string `json:"ca-cert"`
+				AutoUpdate            bool   `json:"auto-update"`
+				ValidateByHashOnStart bool   `json:"validate-by-hash-on-start"`
+				ValidateAge           bool   `json:"validate-age"`
+				MaxAllowedBuiltAge    int64  `json:"max-allowed-built-age"`
+			} `json:"db"`
+			ExternalSources struct {
+				Enable bool `json:"enable"`
+				Maven  struct {
+					SearchUpstreamBySha1 bool   `json:"searchUpstreamBySha1"`
+					BaseURL              string `json:"baseUrl"`
+				} `json:"maven"`
+			} `json:"externalSources"`
+			Match struct {
+				Java struct {
+					UsingCpes bool `json:"using-cpes"`
+				} `json:"java"`
+				Dotnet struct {
+					UsingCpes bool `json:"using-cpes"`
+				} `json:"dotnet"`
+				Golang struct {
+					UsingCpes bool `json:"using-cpes"`
+				} `json:"golang"`
+				Javascript struct {
+					UsingCpes bool `json:"using-cpes"`
+				} `json:"javascript"`
+				Python struct {
+					UsingCpes bool `json:"using-cpes"`
+				} `json:"python"`
+				Ruby struct {
+					UsingCpes bool `json:"using-cpes"`
+				} `json:"ruby"`
+				Stock struct {
+					UsingCpes bool `json:"using-cpes"`
+				} `json:"stock"`
+			} `json:"match"`
+			Dev struct {
+				ProfileCPU bool `json:"profile-cpu"`
+				ProfileMem bool `json:"profile-mem"`
+			} `json:"dev"`
+			FailOnSeverity string `json:"fail-on-severity"`
+			Registry       struct {
+				InsecureSkipTLSVerify bool   `json:"insecure-skip-tls-verify"`
+				InsecureUseHTTP       bool   `json:"insecure-use-http"`
+				Auth                  []any  `json:"auth"`
+				CaCert                string `json:"ca-cert"`
+			} `json:"registry"`
+			Log struct {
+				Structured bool   `json:"structured"`
+				Level      string `json:"level"`
+				File       string `json:"file"`
+			} `json:"log"`
+			ShowSuppressed         bool   `json:"show-suppressed"`
+			ByCve                  bool   `json:"by-cve"`
+			Name                   string `json:"name"`
+			DefaultImagePullSource string `json:"default-image-pull-source"`
+		} `json:"configuration"`
+		Db struct {
+			Built         time.Time `json:"built"`
+			SchemaVersion int       `json:"schemaVersion"`
+			Location      string    `json:"location"`
+			Checksum      string    `json:"checksum"`
+			Error         any       `json:"error"`
+		} `json:"db"`
+		Timestamp time.Time `json:"timestamp"`
+	} `json:"descriptor"`
+}
+
+type ComponentMapKey struct {
+	Name    string
+	Version string
+	Path    string
 }
 
 func (analyzer *ImageAnalyzer) analyzeContent(ci *CurrentImage, ir *myutils.ImageResult) (*myutils.ContentResult, error) {
@@ -302,12 +402,12 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 
 	wg := sync.WaitGroup{}
 
-	// SCA: 调用asky对本地层文件做SCA和漏洞匹配
+	// SCA: 调用Anchore对本地层文件做SCA和漏洞匹配
 	wg.Add(1)
 	go func(layerRootDir, layerDir string, layerRes *myutils.LayerResult, gotErrFlag *bool) {
 		defer wg.Done()
 
-		report, err := scaVul(layerDir, path.Join(layerRootDir, "sca.json"))
+		report, err := scaVul(layerDir, path.Join(layerRootDir, "anchore_result.json"))
 		if err != nil {
 			myutils.Logger.Error("sca and matches vuln for filepath", layerDir, "failed with:", err.Error())
 			*gotErrFlag = true
@@ -315,59 +415,65 @@ func (analyzer *ImageAnalyzer) analyzeLayer(layer *layerInfo, fileWithIssues map
 		}
 
 		// component加入LayerResult
+		componentMap := make(map[ComponentMapKey]struct{})
 		componentList := make([]*myutils.Component, 0)
-		for _, comp := range report.Data.ReportData.Component {
-			relPath := getRelAbsPath(layerDir, comp.FilePath)
-			componentList = append(componentList, &myutils.Component{
-				Filename:    comp.FileName,
-				Codetype:    comp.Codetype,
-				Filepath:    relPath,
-				FileSha1:    comp.FileSha1,
-				FileMd5:     comp.FileMd5,
-				FileVersion: comp.FileVersion,
-				OpenSource:  comp.OpenSource,
-			})
-		}
-
-		// 形成LayerResult的漏洞列表
 		vulnList := make([]*myutils.Vulnerability, 0)
-		for _, vuln := range report.Data.ReportData.VulnInfo {
-			relPath := getRelAbsPath(layerDir, vuln.FilePath)
-			affectFile := make([]string, len(vuln.AffectFile))
-			for i, p := range vuln.AffectFile {
-				tmpRel := getRelAbsPath(layerDir, p)
-				affectFile[i] = tmpRel
-			}
-			cvss, _ := strconv.ParseFloat(vuln.CVSSScore, 64)
+		affectFileList := make([]string, 0)
+		for _, match := range report.Matches {
+			for _, loc := range match.Artifact.Locations {
+				affectFileList = append(affectFileList, loc.Path)
+				tmpKey := ComponentMapKey{
+					Name:    match.Artifact.Name,
+					Version: match.Artifact.Version,
+					Path:    loc.Path,
+				}
 
+				if _, ok := componentMap[tmpKey]; ok {
+					continue
+				}
+
+				componentList = append(componentList, &myutils.Component{
+					Filename: match.Artifact.Name,
+					Codetype: match.Artifact.Language,
+					Filepath: loc.Path,
+					// FileSha1:    match.Artifact.ID,
+					// FileMd5:     match.Artifact.ID,
+					FileVersion: match.Artifact.Version,
+					OpenSource:  match.Artifact.Type,
+				})
+
+				componentMap[tmpKey] = struct{}{}
+			}
+
+			cvss := match.Vulnerability.Cvss[0].Metrics.BaseScore
 			vulnList = append(vulnList, &myutils.Vulnerability{
 				Type:        myutils.IssueType.Vulnerability,
-				Name:        vuln.CVEID,
+				Name:        match.Vulnerability.ID,
 				Part:        myutils.IssuePart.Content,
-				Path:        relPath,
+				Path:        match.Artifact.Locations[0].Path,
 				LayerDigest: layer.digest,
 
-				CVEID:           vuln.CVEID,
-				Filename:        vuln.FileName,
-				ProductName:     vuln.ProductName,
-				VendorName:      vuln.VendorName,
-				Version:         vuln.Version,
-				VulnType:        vuln.VulnType,
-				ThrType:         vuln.ThrType,
-				PublishedTime:   vuln.PublishedTime,
-				Description:     vuln.Description,
-				Severity:        vuln.Severity,
+				CVEID: match.Vulnerability.ID,
+				// Filename:    match.Vulnerability.FileName,
+				ProductName: match.Artifact.Name,
+				// VendorName:  match.Artifact.VendorName,
+				Version: match.Artifact.Version,
+				// VulnType: match.Vulnerability.VulnType,
+				// ThrType:  match.Vulnerability.ThrType,
+				// PublishedTime:   match.Vulnerability.PublishedTime,
+				Description:     match.Vulnerability.Description,
+				Severity:        match.Vulnerability.Severity,
 				CVSSScore:       cvss,
-				AffectComponent: vuln.AffectComponent,
-				AffectFile:      affectFile,
+				AffectComponent: []string{match.Artifact.Name},
+				AffectFile:      affectFileList,
 			})
 		}
 
 		// 上锁写入layer
 		resLock.Lock()
 		defer resLock.Unlock()
-		layerRes.Total = report.Data.ReportData.Total
-		layerRes.ComponentNum = report.Data.ReportData.ComponentNum
+		layerRes.Total = len(vulnList)
+		layerRes.ComponentNum = len(componentList)
 		layerRes.Components = componentList
 		layerRes.Vulnerabilities = vulnList
 	}(layer.localRootFilePath, layer.localFilePath, res, &layerGotErr)
@@ -430,9 +536,9 @@ func (analyzer *ImageAnalyzer) analyzeLayerVul(layer *layerInfo, fileWithIssues 
 	res.Size = layer.size
 	res.Digest = layer.digest
 
-	// SCA: 调用asky对本地层文件做SCA和漏洞匹配
+	// SCA: 调用Anchore对本地层文件做SCA和漏洞匹配
 	func(layerRootDir, layerDir string, layerRes *myutils.LayerResult, gotErrFlag *bool) {
-		report, err := scaVul(layerDir, path.Join(layerRootDir, "sca.json"))
+		report, err := scaVul(layerDir, path.Join(layerRootDir, "anchore_result.json"))
 		if err != nil {
 			myutils.Logger.Error("sca and matches vuln for filepath", layerDir, "failed with:", err.Error())
 			*gotErrFlag = true
@@ -440,57 +546,63 @@ func (analyzer *ImageAnalyzer) analyzeLayerVul(layer *layerInfo, fileWithIssues 
 		}
 
 		// component加入LayerResult
+		componentMap := make(map[ComponentMapKey]struct{})
 		componentList := make([]*myutils.Component, 0)
-		for _, comp := range report.Data.ReportData.Component {
-			relPath := getRelAbsPath(layerDir, comp.FilePath)
-			componentList = append(componentList, &myutils.Component{
-				Filename:    comp.FileName,
-				Codetype:    comp.Codetype,
-				Filepath:    relPath,
-				FileSha1:    comp.FileSha1,
-				FileMd5:     comp.FileMd5,
-				FileVersion: comp.FileVersion,
-				OpenSource:  comp.OpenSource,
-			})
-		}
-
-		// 形成LayerResult的漏洞列表
 		vulnList := make([]*myutils.Vulnerability, 0)
-		for _, vuln := range report.Data.ReportData.VulnInfo {
-			relPath := getRelAbsPath(layerDir, vuln.FilePath)
-			affectFile := make([]string, len(vuln.AffectFile))
-			for i, p := range vuln.AffectFile {
-				tmpRel := getRelAbsPath(layerDir, p)
-				affectFile[i] = tmpRel
-			}
-			cvss, _ := strconv.ParseFloat(vuln.CVSSScore, 64)
+		affectFileList := make([]string, 0)
+		for _, match := range report.Matches {
+			for _, loc := range match.Artifact.Locations {
+				affectFileList = append(affectFileList, loc.Path)
+				tmpKey := ComponentMapKey{
+					Name:    match.Artifact.Name,
+					Version: match.Artifact.Version,
+					Path:    loc.Path,
+				}
 
+				if _, ok := componentMap[tmpKey]; ok {
+					continue
+				}
+
+				componentList = append(componentList, &myutils.Component{
+					Filename: match.Artifact.Name,
+					Codetype: match.Artifact.Language,
+					Filepath: loc.Path,
+					// FileSha1:    match.Artifact.ID,
+					// FileMd5:     match.Artifact.ID,
+					FileVersion: match.Artifact.Version,
+					OpenSource:  match.Artifact.Type,
+				})
+
+				componentMap[tmpKey] = struct{}{}
+			}
+
+			cvss := match.Vulnerability.Cvss[0].Metrics.BaseScore
 			vulnList = append(vulnList, &myutils.Vulnerability{
 				Type:        myutils.IssueType.Vulnerability,
-				Name:        vuln.CVEID,
+				Name:        match.Vulnerability.ID,
 				Part:        myutils.IssuePart.Content,
-				Path:        relPath,
+				Path:        match.Artifact.Locations[0].Path,
 				LayerDigest: layer.digest,
 
-				CVEID:           vuln.CVEID,
-				Filename:        vuln.FileName,
-				ProductName:     vuln.ProductName,
-				VendorName:      vuln.VendorName,
-				Version:         vuln.Version,
-				VulnType:        vuln.VulnType,
-				ThrType:         vuln.ThrType,
-				PublishedTime:   vuln.PublishedTime,
-				Description:     vuln.Description,
-				Severity:        vuln.Severity,
+				CVEID: match.Vulnerability.ID,
+				// Filename:    match.Vulnerability.FileName,
+				ProductName: match.Artifact.Name,
+				// VendorName:  match.Artifact.VendorName,
+				Version: match.Artifact.Version,
+				// VulnType: match.Vulnerability.VulnType,
+				// ThrType:  match.Vulnerability.ThrType,
+				// PublishedTime:   match.Vulnerability.PublishedTime,
+				Description:     match.Vulnerability.Description,
+				Severity:        match.Vulnerability.Severity,
 				CVSSScore:       cvss,
-				AffectComponent: vuln.AffectComponent,
-				AffectFile:      affectFile,
+				AffectComponent: []string{match.Artifact.Name},
+				AffectFile:      affectFileList,
 			})
 		}
 
 		// 没有竞争，无需上锁直接写
-		layerRes.Total = report.Data.ReportData.Total
-		layerRes.ComponentNum = report.Data.ReportData.ComponentNum
+		layerRes.Total = len(vulnList)
+		layerRes.ComponentNum = len(componentList)
 		layerRes.Components = componentList
 		layerRes.Vulnerabilities = vulnList
 	}(layer.localRootFilePath, layer.localFilePath, res, &layerGotErr)
@@ -504,179 +616,31 @@ func (analyzer *ImageAnalyzer) analyzeLayerVul(layer *layerInfo, fileWithIssues 
 }
 
 // scaVul 对层文件进行SCA并进行漏洞匹配
-func scaVul(layerDir, dest string) (*AskYReport, error) {
-	// 调用asky脚本本地SCA，设置超时
+func scaVul(layerDir, dest string) (*AnchoreReport, error) {
 	timeout := 1 * time.Hour
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	tmpLogFilepath := path.Join(myutils.GlobalConfig.TmpDir, "asky_tmp", strconv.FormatInt(time.Now().UnixNano(), 10))
-	cmd := exec.CommandContext(ctx, myutils.GlobalConfig.AskyConfig.Filepath, "-s", layerDir, "-o", dest, "-d", tmpLogFilepath)
-	//cmd := exec.CommandContext(ctx, "bash", myutils.GlobalConfig.AskyConfig.Filepath, "-s", layerDir, "-o", dest)
+	cmd := exec.CommandContext(
+		ctx,
+		myutils.GlobalConfig.AnchoreConfig.Filepath,
+		layerDir,
+		"--file", dest,
+		"--output", "json")
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("sca with asky for filepath %s timeout with %s", layerDir, timeout)
+		return nil, fmt.Errorf("scavul with anchore for filepath %s timeout with %s", layerDir, timeout)
 	} else if err != nil {
 		return nil, err
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy:           nil,
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
-		},
-	}
-
-	// 上传asky sca结果到天蚕API，建立检测任务
-	task, err := postCreateAskYTask(client, dest)
-	if err != nil {
-		myutils.Logger.Error("post SCA result file", dest, "to asky server failed with:", err.Error())
-		return nil, err
-	}
-
-	// 获取检测报告
-	report, err := checkGetAskYReport(client, task)
-	if err != nil {
-		myutils.Logger.Error("check and get asky report of task", task.Data.TaskID, "failed with:", err.Error())
-		return nil, err
-	}
-
-	return report, nil
-}
-
-// postCreateAskYTask 将指定SCA结果文件上传到asky服务端，返回检测任务信息
-func postCreateAskYTask(client *http.Client, dest string) (*AskYTask, error) {
-	file, err := os.Open(dest)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", file.Name())
-	if err != nil {
-		return nil, err
-	}
-	_, err = io.Copy(part, file)
-	if err != nil {
-		return nil, err
-	}
-	err = writer.Close()
+	report := new(AnchoreReport)
+	reportFile, err := os.ReadFile(dest)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://beta.tqs.qianxin-inc.cn/asky/skily/uploadLog?token=%s", myutils.GlobalConfig.AskyConfig.Token), body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// 检查http响应，更稳定获取任务信息
-	if resp.StatusCode != http.StatusOK {
-		stat, err := file.Stat()
-		if err == nil {
-			myutils.Logger.Error(fmt.Sprintf("unexpected http status code: %d, with file size: %d", resp.StatusCode, stat.Size()))
-		}
-		return nil, fmt.Errorf("unexpected http status code: %d", resp.StatusCode)
-	}
-
-	var respBody bytes.Buffer
-	_, err = io.Copy(&respBody, resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	task := new(AskYTask)
-	if err = json.Unmarshal(respBody.Bytes(), task); err != nil {
-		return nil, err
-	}
-	if task.Data.Status != "0" && task.Data.Status != "1" && task.Data.Status != "2" {
-		return nil, fmt.Errorf("asky start with task code %s", task.Code)
-	}
-
-	return task, nil
-}
-
-// checkGetAskYReport 查询服务端检测状态，检测完成后获取检测报告
-func checkGetAskYReport(client *http.Client, task *AskYTask) (*AskYReport, error) {
-	// 等待asky服务端检测任务完成
-	waitCnt := 0
-	failCnt := 0
-	for {
-		time.Sleep(1 * time.Second)
-
-		// 获取检测状态
-		statusReq, err := http.NewRequest(http.MethodGet,
-			fmt.Sprintf("http://beta.tqs.qianxin-inc.cn/asky/skily/queryTaskStatus?sha1=%s&tid=%s", task.Data.Sha1, task.Data.Flag2),
-			nil,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := client.Do(statusReq)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-
-		state := new(AskYTask)
-		if err := json.Unmarshal(body, state); err != nil {
-			return nil, err
-		}
-
-		// 检测完成时退出循环
-		if state.Data.Status == "0" {
-			waitCnt++
-			if waitCnt > 300 {
-				return nil, fmt.Errorf("waiting for asky server scanning filepath %s timeout after %d wait retries", task.Data.FileName, waitCnt)
-			}
-		} else if state.Data.Status == "1" {
-			failCnt++
-			if failCnt > 300 {
-				return nil, fmt.Errorf("waiting for asky server scanning filepath %s timeout after %d scan retries", task.Data.FileName, failCnt)
-			}
-		} else if state.Data.Status == "2" {
-			break
-		} else if state.Data.Status == "3" || state.Data.Status == "4" {
-			return nil, fmt.Errorf("asky server response exception (task status %s)", state.Data.Status)
-		}
-	}
-
-	// 获取检测结果
-	reportReq, err := http.NewRequest(http.MethodGet,
-		fmt.Sprintf("http://beta.tqs.qianxin-inc.cn/asky/skily/queryReport/%s?token=%s", task.Data.TaskID, myutils.GlobalConfig.AskyConfig.Token),
-		nil)
-	if err != nil {
-		return nil, err
-	}
-
-	reportResp, err := client.Do(reportReq)
-	if err != nil {
-		return nil, err
-	}
-	defer reportResp.Body.Close()
-
-	body, err := io.ReadAll(reportResp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	report := new(AskYReport)
-	if err := json.Unmarshal(body, report); err != nil {
+	if err = json.Unmarshal(reportFile, report); err != nil {
 		return nil, err
 	}
 
@@ -745,12 +709,9 @@ func (analyzer *ImageAnalyzer) scanLayerFunc(layer *layerInfo, fileWithIssues ma
 	}
 }
 
-// scanFileMalicious 利用奇安信云查接口检查文件是否恶意
 func scanFileMalicious(filepath string) (*myutils.MaliciousFile, bool, error) {
-	reputation, err := getFileReputation(filepath)
-	if err != nil {
-		return nil, false, err
-	}
+	// TODO: generate FileReputation with your own tool
+	reputation := FileReputation{}
 
 	if reputation.MalwareName == "" {
 		return nil, false, nil
@@ -772,44 +733,6 @@ func scanFileMalicious(filepath string) (*myutils.MaliciousFile, bool, error) {
 	}
 
 	return i, true, nil
-}
-
-func getFileReputation(filepath string) (*FileReputation, error) {
-	h, err := myutils.Sha256File(filepath)
-	if err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy:           nil,
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
-		},
-	}
-
-	req, err := http.NewRequest(http.MethodGet,
-		fmt.Sprintf("http://tqs.qianxin-inc.cn/file/v1/files/%s/reputation", h),
-		nil,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	res := new(FileReputation)
-	err = json.Unmarshal(body, res)
-
-	return res, err
 }
 
 func getRelAbsPath(layerDir, path string) string {

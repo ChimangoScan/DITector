@@ -2,7 +2,6 @@ package myutils
 
 import (
 	"fmt"
-	"io/fs"
 	"log"
 	"path/filepath"
 	"testing"
@@ -22,7 +21,7 @@ func TestDivideImageName(t *testing.T) {
 
 func TestSha256File(t *testing.T) {
 	begin := time.Now()
-	h, e := Sha256File("/data/tmp/docker-proj/library-mongo-latest.tar")
+	h, e := Sha256File("/data/tmp/library-mongo-latest.tar")
 	if e != nil {
 		log.Fatalln("got error:", e)
 	}
@@ -52,16 +51,4 @@ func TestSha256Str(t *testing.T) {
 
 func TestRelPath(t *testing.T) {
 	fmt.Println(filepath.Rel("/aaa/bbb/ccc/layer/", "/aaa/bbb/ccc/layer/etc/library"))
-}
-
-func TestWalkDir(t *testing.T) {
-	if err := filepath.Walk("/Users/musso/codes/gocodes/dockercrawler", func(path string, info fs.FileInfo, err error) error {
-		if info.IsDir() && (info.Name() == "pkg" || info.Name() == ".git") {
-			return filepath.SkipDir
-		}
-		fmt.Println(path, info.Name())
-		return nil
-	}); err != nil {
-		log.Fatalln("failed with ", err)
-	}
 }

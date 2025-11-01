@@ -3,10 +3,11 @@ package misconfiguration
 import (
 	"bufio"
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 // redis.conf

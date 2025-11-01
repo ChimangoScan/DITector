@@ -2,10 +2,11 @@ package misconfiguration
 
 import (
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
-	"gopkg.in/yaml.v3"
 	"os"
 	"regexp"
+
+	"github.com/NSSL-SJTU/DITector/myutils"
+	"gopkg.in/yaml.v3"
 )
 
 var (

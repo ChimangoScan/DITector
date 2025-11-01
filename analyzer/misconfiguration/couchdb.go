@@ -2,9 +2,10 @@ package misconfiguration
 
 import (
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
-	"gopkg.in/ini.v1"
 	"regexp"
+
+	"github.com/NSSL-SJTU/DITector/myutils"
+	"gopkg.in/ini.v1"
 )
 
 // 默认配置文件路径：

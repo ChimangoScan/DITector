@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
 	"os/exec"
 	"time"
+
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 // scanSecretsInFilepath 调用trufflehog扫描指定文件路径下的隐私信息

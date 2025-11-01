@@ -38,7 +38,3 @@ func TestScanNginxConfFile(t *testing.T) {
 	fmt.Println(FileNeedScan(file))
 	fmt.Println(ScanNginxConfFile(file))
 }
-
-func TestScanFileMisconfiguration(t *testing.T) {
-	fmt.Println(ScanFileMisconfiguration("/Users/musso/workshop/docker-projects/test/mongod.conf", AppMongo))
-}

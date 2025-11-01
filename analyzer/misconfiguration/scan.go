@@ -1,8 +1,9 @@
 package misconfiguration
 
 import (
-	"github.com/Musso12138/docker-scan/myutils"
 	"regexp"
+
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 const (

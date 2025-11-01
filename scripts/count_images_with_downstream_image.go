@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 // CountNodeWithUpstreamImages 计算存在上游镜像的镜像节点数

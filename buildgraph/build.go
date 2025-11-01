@@ -4,16 +4,9 @@ func Build(format string, page int64, pageSize int64, tagCnt int, pullCountThres
 	config(format)
 
 	switch format {
-	case "json":
-		BuildFromJSON()
 	case "mongo":
 		BuildFromMongo(page, pageSize, tagCnt, pullCountThreshold)
 	}
-}
-
-// BuildFromJSON 根据crawler爬到的json内容建立信息库
-func BuildFromJSON() {
-	StartFromJSON()
 }
 
 // BuildFromMongo 根据crawler爬到的mysql内容建立信息库

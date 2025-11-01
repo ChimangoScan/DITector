@@ -18,20 +18,10 @@ var GlobalConfig struct {
 	LogFile              string `yaml:"log_file"`
 	RepoWithManyTagsFile string `yaml:"repo_with_many_tags_file"`
 	TmpDir               string `yaml:"tmp_dir"`
-	DataSource           struct {
-		RepositoriesFile string `yaml:"repositories_file"`
-		TagsFile         string `yaml:"tags_file"`
-		ImagesFile       string `yaml:"images_file"`
-	} `yaml:"data_source"`
-	Proxy struct {
+	Proxy                struct {
 		HTTPProxy  string `yaml:"http_proxy"`
 		HTTPSProxy string `yaml:"https_proxy"`
 	} `yaml:"proxy"`
-	CrawlerConfig struct {
-		LocalProxy bool   `yaml:"local_proxy"`
-		ProxyFile  string `yaml:"proxy_file"`
-		MysqlDSN   string `yaml:"mysql_dsn"`
-	} `yaml:"crawler_config"`
 	DockerConfig struct {
 		Username      string `yaml:"username"`
 		Password      string `yaml:"password"`
@@ -57,27 +47,17 @@ var GlobalConfig struct {
 		Neo4jUsername string `yaml:"neo4j_username"`
 		Neo4jPassword string `yaml:"neo4j_password"`
 	} `yaml:"neo4j_config"`
-	ESConfig struct {
-		ESURI       string `yaml:"es_uri"`
-		ESUsername  string `yaml:"es_username"`
-		ESPassword  string `yaml:"es_password"`
-		ESIndexName string `yaml:"es_index"`
-	} `yaml:"es_config"`
 	RulesConfig struct {
 		SecretRulesFile         string `yaml:"secret_rules_file"`
 		SensitiveParamRulesFile string `yaml:"sensitive_param_rules_file"`
 	} `yaml:"rules_config"`
-	AskyConfig struct {
-		Filepath string `yaml:"filepath"`
-		Token    string `yaml:"token"`
-	} `yaml:"asky_config"`
 	TrufflehogConfig struct {
 		Filepath string `yaml:"filepath"`
 		Verify   bool   `yaml:"verify"`
 	} `yaml:"trufflehog_config"`
-	NSSLLicenseConfig struct {
+	AnchoreConfig struct {
 		Filepath string `yaml:"filepath"`
-	} `yaml:"nssl_license_config"`
+	} `yaml:"anchore_config"`
 }
 
 // GlobalDBClient 用于维护全局所有模块的数据库client连接
@@ -86,8 +66,6 @@ var GlobalDBClient struct {
 	MongoFlag bool // 标识Mongo是否成功连接
 	Neo4j     *MyNeo4j
 	Neo4jFlag bool // 标识Neo4j是否成功连接
-	ES        *MyES
-	ESFlag    bool // 标识elasticsearch是否成功连接
 }
 
 func LoadConfigFromFile(configFilepath string, logLevel int) {
@@ -150,17 +128,11 @@ func relativeToAbsoluteConfig(root string) {
 	if !strings.HasPrefix(GlobalConfig.LogFile, "/") {
 		GlobalConfig.LogFile = path.Join(root, GlobalConfig.LogFile)
 	}
-	if !strings.HasPrefix(GlobalConfig.CrawlerConfig.ProxyFile, "/") {
-		GlobalConfig.CrawlerConfig.ProxyFile = path.Join(root, GlobalConfig.CrawlerConfig.ProxyFile)
-	}
 	if !strings.HasPrefix(GlobalConfig.RulesConfig.SecretRulesFile, "/") {
 		GlobalConfig.RulesConfig.SecretRulesFile = path.Join(root, GlobalConfig.RulesConfig.SecretRulesFile)
 	}
 	if !strings.HasPrefix(GlobalConfig.RulesConfig.SensitiveParamRulesFile, "/") {
 		GlobalConfig.RulesConfig.SensitiveParamRulesFile = path.Join(root, GlobalConfig.RulesConfig.SensitiveParamRulesFile)
-	}
-	if !strings.HasPrefix(GlobalConfig.NSSLLicenseConfig.Filepath, "/") {
-		GlobalConfig.NSSLLicenseConfig.Filepath = path.Join(root, GlobalConfig.NSSLLicenseConfig.Filepath)
 	}
 }
 
@@ -188,16 +160,6 @@ func connectDBs() {
 	} else {
 		GlobalDBClient.Neo4jFlag = true
 		fmt.Println("[+] Connect to Neo4j")
-	}
-
-	// 连接Elasticsearch
-	if GlobalDBClient.ES, err = NewESGlobalConfig(); err != nil {
-		GlobalDBClient.ESFlag = false
-		Logger.Error("connect to Elasticsearch failed with:", err.Error())
-		fmt.Println("[-] Connect to Elasticsearch failed")
-	} else {
-		GlobalDBClient.ESFlag = true
-		fmt.Println("[+] Connect to Elasticsearch")
 	}
 }
 

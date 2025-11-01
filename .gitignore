@@ -18,5 +18,5 @@ pkg/
 # ==========================
 # used for build files
 # ==========================
-docker-scan
 *result.json
+ditector

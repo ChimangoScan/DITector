@@ -7,8 +7,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/Musso12138/docker-scan/analyzer/extractor"
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/analyzer/extractor"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 func (analyzer *ImageAnalyzer) analyzeMetadata(ci *CurrentImage) (*myutils.MetadataResult, error) {

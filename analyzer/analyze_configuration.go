@@ -2,8 +2,9 @@ package analyzer
 
 import (
 	"fmt"
-	"github.com/Musso12138/docker-scan/myutils"
 	"strings"
+
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 func (analyzer *ImageAnalyzer) analyzeConfiguration(ci *CurrentImage) (*myutils.ConfigurationResult, error) {

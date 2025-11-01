@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Musso12138/docker-scan/myutils"
+	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 // CheckSameNodeAsHighDependentImages 统计高依赖权重镜像的节点
