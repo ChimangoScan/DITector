@@ -137,13 +137,10 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 
 	for _, repo := range searchRes.Results {
 		if myutils.GlobalDBClient.MongoFlag {
-			err := myutils.GlobalDBClient.Mongo.UpsertRepository(&repo)
+			err := myutils.GlobalDBClient.Mongo.UpdateRepository(&repo)
 			if err != nil {
-				myutils.Logger.Error(fmt.Sprintf("Failed to upsert repo %s/%s: %v", repo.Namespace, repo.Name, err))
+				myutils.Logger.Error(fmt.Sprintf("Failed to update repo %s/%s: %v", repo.Namespace, repo.Name, err))
 			}
 		}
-	}
-}
-	}
 	}
 }
