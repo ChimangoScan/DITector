@@ -28,6 +28,10 @@ type Repository struct {
 	} `json:"permissions" bson:"permissions"`
 	MediaTypes   []string `json:"media_types" bson:"media_types"`
 	ContentTypes []string `json:"content_types" bson:"content_types"`
+	// GraphBuiltAt is set by Stage II once ALL tags/images for this repo have
+	// been inserted into Neo4j. On restart, repos with this field set are
+	// skipped, enabling O(done) resume instead of full reprocessing.
+	GraphBuiltAt string `json:"graph_built_at,omitempty" bson:"graph_built_at,omitempty"`
 }
 
 type Tag struct {

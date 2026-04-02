@@ -20,6 +20,10 @@ type MyMongo struct {
 	ImgResultColl   *mongo.Collection
 	LayerResultColl *mongo.Collection
 	UserColl        *mongo.Collection
+	// KeywordsColl stores the set of keywords fully crawled by Stage I.
+	// _id = keyword string; crawled_at = RFC3339 timestamp.
+	// Enables O(1) resume: already-crawled keywords are skipped on restart.
+	KeywordsColl *mongo.Collection
 }
 
 func NewMongoGlobalConfig() (*MyMongo, error) {
@@ -56,6 +60,7 @@ func NewMongo(uri, database, repositories, tags, images, imgResults, layerResult
 	mymongo.ImgResultColl = mymongo.DockerHubDB.Collection(imgResults)
 	// mymongo.LayerResultColl = mymongo.DockerHubDB.Collection(layerResults)
 	mymongo.UserColl = mymongo.DockerHubDB.Collection(user)
+	mymongo.KeywordsColl = mymongo.DockerHubDB.Collection("crawler_keywords")
 
 	// TODO: 初次使用建立索引
 	if initFlag {
@@ -407,6 +412,38 @@ func (m *MyMongo) BulkUpsertRepositories(repos []*Repository) error {
 	}
 	opts := options.BulkWrite().SetOrdered(false) // unordered = parallel execution on server
 	_, err := m.RepoColl.BulkWrite(context.TODO(), models, opts)
+	return err
+}
+
+// --- Stage I checkpoint: crawler keyword tracking ---
+
+// IsKeywordCrawled reports whether keyword was fully crawled in a previous run.
+func (m *MyMongo) IsKeywordCrawled(keyword string) bool {
+	count, err := m.KeywordsColl.CountDocuments(context.TODO(), bson.M{"_id": keyword})
+	return err == nil && count > 0
+}
+
+// MarkKeywordCrawled records keyword as fully crawled. Idempotent (upsert).
+func (m *MyMongo) MarkKeywordCrawled(keyword string) error {
+	_, err := m.KeywordsColl.UpdateOne(
+		context.TODO(),
+		bson.M{"_id": keyword},
+		bson.M{"$setOnInsert": bson.M{"_id": keyword, "crawled_at": time.Now().UTC().Format(time.RFC3339)}},
+		options.Update().SetUpsert(true),
+	)
+	return err
+}
+
+// --- Stage II checkpoint: per-repo graph build tracking ---
+
+// MarkRepoGraphBuilt sets graph_built_at on the repo document. Called by Stage II
+// after all tags/images for the repo have been inserted into Neo4j.
+func (m *MyMongo) MarkRepoGraphBuilt(namespace, name string) error {
+	_, err := m.RepoColl.UpdateOne(
+		context.TODO(),
+		bson.M{"namespace": namespace, "name": name},
+		bson.M{"$set": bson.M{"graph_built_at": time.Now().UTC().Format(time.RFC3339)}},
+	)
 	return err
 }
 

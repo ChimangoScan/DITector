@@ -91,6 +91,12 @@ type V2SearchResponse struct {
 }
 
 func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) {
+	// Resume: skip keywords that were fully crawled in a previous run.
+	if myutils.GlobalDBClient.MongoFlag && myutils.GlobalDBClient.Mongo.IsKeywordCrawled(keyword) {
+		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] already crawled, skipping", keyword))
+		return
+	}
+
 	url := myutils.GetV2SearchURL(keyword, 1, 100)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -125,6 +131,10 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 
 	// 2. DFS Strategy
 	if searchRes.Count >= 10000 && len(keyword) < 5 {
+		// Keyword has too many results — deepen the DFS tree. Do NOT mark as
+		// crawled: child keywords carry the actual data and will be marked
+		// individually. On restart, deepening re-runs cheaply (just enqueues
+		// children; already-crawled children are skipped immediately).
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has %d results. Deepening DFS...", keyword, searchRes.Count))
 		for _, char := range alphabet {
 			pc.KeywordChan <- keyword + string(char)
@@ -132,8 +142,17 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 	} else if searchRes.Count > 0 {
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping...", keyword, searchRes.Count))
 		pc.scrapeAllPages(keyword, searchRes.Count, client, token)
+		if myutils.GlobalDBClient.MongoFlag {
+			if err := myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword); err != nil {
+				myutils.Logger.Error(fmt.Sprintf("MarkKeywordCrawled [%s] failed: %v", keyword, err))
+			}
+		}
 	} else {
-		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] returned 0 results.", keyword))
+		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] returned 0 results.", keyword))
+		// Mark zero-result keywords as done so they are never retried.
+		if myutils.GlobalDBClient.MongoFlag {
+			_ = myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
+		}
 	}
 }
 

@@ -80,7 +80,13 @@ func StartFromMongo(page int64, pageSize int64, tagCnt int, pullCountThreshold i
 func loadReposToChannel(page int64, pageSize int64, threshold int64, ch chan *myutils.Repository) {
 	repoPage := page
 	for {
-		filter := bson.M{"pull_count": bson.M{"$gte": threshold}}
+		// Resume: only load repos that have NOT been fully processed by a
+		// previous run. graph_built_at is set by repoWorker after all tags
+		// and images for the repo have been inserted into Neo4j.
+		filter := bson.M{
+			"pull_count":     bson.M{"$gte": threshold},
+			"graph_built_at": bson.M{"$exists": false},
+		}
 		repos, err := myutils.GlobalDBClient.Mongo.FindRepositoriesByKeywordPaged(filter, repoPage, pageSize)
 		if err != nil || len(repos) == 0 {
 			break
@@ -189,6 +195,13 @@ func repoWorker(repoChan chan *myutils.Repository, jobChan chan GraphJob, tagCnt
 			}(tag)
 		}
 		wg.Wait()
+
+		// All tags processed: mark repo as graph-built so it is skipped on restart.
+		if myutils.GlobalDBClient.MongoFlag {
+			if err := myutils.GlobalDBClient.Mongo.MarkRepoGraphBuilt(repo.Namespace, repo.Name); err != nil {
+				myutils.Logger.Error(fmt.Sprintf("MarkRepoGraphBuilt %s/%s failed: %v", repo.Namespace, repo.Name, err))
+			}
+		}
 	}
 }
 
