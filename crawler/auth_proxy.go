@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -54,8 +55,18 @@ func LoadIdentities(proxyFile, accountFile string) (*IdentityManager, error) {
 	return im, nil
 }
 
+var loginMu sync.Mutex
+
 // LoginDockerHub performs authentication and returns a JWT token
 func (im *IdentityManager) LoginDockerHub(acc *Account) error {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+
+	// Check if another worker already got the token while we were waiting
+	if acc.Token != "" {
+		return nil
+	}
+
 	myutils.Logger.Info(fmt.Sprintf("Attempting login for user: %s", acc.Username))
 	
 	loginURL := "https://hub.docker.com/v2/users/login/"
@@ -80,7 +91,8 @@ func (im *IdentityManager) LoginDockerHub(acc *Account) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("login failed with status: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("login failed with status: %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	var res struct {
