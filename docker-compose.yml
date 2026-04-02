@@ -16,7 +16,7 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      - NEO4J_AUTH=none  # Sem auth para facilitar no início da pesquisa
+      - NEO4J_AUTH=none
     volumes:
       - neo4j_data:/data
 
@@ -29,8 +29,11 @@ services:
     volumes:
       - .:/app
     working_dir: /app
-    network_mode: host # Crucial para conectar no localhost e usar vários IPs
-    command: go run main.go crawl --workers 50 --seed 'a' --accounts accounts.json
+    network_mode: host
+    environment:
+      - SEED=${SEED:-a}
+    command: >
+      sh -c "go run main.go crawl --workers 50 --seed $$SEED --accounts accounts.json"
 
 volumes:
   mongo_data:
