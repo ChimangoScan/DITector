@@ -37,9 +37,7 @@ func LoadIdentities(proxyFile, accountFile string) (*IdentityManager, error) {
 	if proxyFile != "" {
 		data, err := os.ReadFile(proxyFile)
 		if err == nil {
-			// Assuming line-separated proxies like http://user:pass@ip:port
-			// For simplicity in this demo, we use a slice
-			// You can implement more complex parsing here
+			// In a real scenario, you'd parse proxies here
 			fmt.Println("Loaded proxies from", proxyFile)
 		}
 	}
@@ -56,44 +54,44 @@ func LoadIdentities(proxyFile, accountFile string) (*IdentityManager, error) {
 	return im, nil
 }
 
-// GetNextClient returns an http.Client with a rotated proxy and auth header
+// LoginDockerHub performs authentication and returns a JWT token
+func (im *IdentityManager) LoginDockerHub(acc *Account) error {
+	myutils.Logger.Info(fmt.Sprintf("Attempting login for user: %s", acc.Username))
+	
+	loginURL := "https://hub.docker.com/v2/users/login/"
+	payload, _ := json.Marshal(map[string]string{
+		"username": acc.Username,
+		"password": acc.Password,
+	})
+
+	resp, err := http.Post(loginURL, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("login failed with status: %d", resp.StatusCode)
+	}
+
+	var res struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return err
+	}
+
+	acc.Token = res.Token
+	myutils.Logger.Info(fmt.Sprintf("Successfully obtained new JWT for %s", acc.Username))
+	return nil
+}
+
+// GetNextClient returns an http.Client and a valid Token (logins if necessary)
 func (im *IdentityManager) GetNextClient() (*http.Client, string) {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 
 	transport := &http.Transport{}
-	
-	// Proxy Rotation
-	if len(im.Proxies) > 0 {
-		proxyURL, _ := url.Parse(im.Proxies[im.proxyIdx])
-		transport.Proxy = http.ProxyURL(proxyURL)
-		im.proxyIdx = (im.proxyIdx + 1) % len(im.Proxies)
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   15 * time.Second,
-	}
-
-	// Account Rotation (JWT Token)
-	var authToken string
-	if len(im.Accounts) > 0 {
-		acc := im.Accounts[im.accIdx]
-		if acc.Token == "" {
-			// In a real scenario, you'd call LoginDockerHub here to get the JWT
-			// For now, we assume tokens are pre-loaded or we use basic auth
-			myutils.Logger.Debug(fmt.Sprintf("Rotating account to: %s", acc.Username))
-		}
-		authToken = acc.Token
-		im.accIdx = (im.accIdx + 1) % len(im.Accounts)
-	}
-
-	return client, authToken
-}
-
-// In a real implementation, you'd add a method here to Login to Docker Hub
-// and refresh tokens when they expire.
-tp.Transport{}
 	
 	if len(im.Proxies) > 0 {
 		proxyURL, _ := url.Parse(im.Proxies[im.proxyIdx])
