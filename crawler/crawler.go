@@ -24,15 +24,15 @@ type ParallelCrawler struct {
 	WorkerCount int
 	KeywordChan chan string
 	WG          sync.WaitGroup
-	HTTPClient  *http.Client
+	IM          *IdentityManager
 }
 
 // NewParallelCrawler initializes a new crawler
-func NewParallelCrawler(workers int) *ParallelCrawler {
+func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 	return &ParallelCrawler{
 		WorkerCount: workers,
 		KeywordChan: make(chan string, 1000000), // Buffer for DFS keywords
-		HTTPClient:  &http.Client{Timeout: 15 * time.Second},
+		IM:          im,
 	}
 }
 
@@ -51,22 +51,28 @@ func (pc *ParallelCrawler) Start() {
 		pc.KeywordChan <- string(char)
 	}
 
-	// We don't close the channel here because DFS will add more keywords
-	// Monitoring logic or a specific stop signal can be added later
+	// Wait for workers to finish
 	pc.WG.Wait()
 }
 
 func (pc *ParallelCrawler) worker() {
 	defer pc.WG.Done()
+	// Each worker gets its own identity rotation client
+	client, token := pc.IM.GetNextClient()
 	for keyword := range pc.KeywordChan {
-		pc.crawlKeyword(keyword)
+		pc.crawlKeyword(keyword, client, token)
 	}
 }
 
-func (pc *ParallelCrawler) crawlKeyword(keyword string) {
+func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) {
 	// 1. Check first page to get count
 	url := myutils.GetRegURL(keyword, "community", "1", "100")
-	resp, err := pc.HTTPClient.Get(url)
+	req, _ := http.NewRequest("GET", url, nil)
+	if token != "" {
+		req.Header.Add("Authorization", "JWT "+token)
+	}
+	
+	resp, err := client.Do(req)
 	if err != nil {
 		myutils.Logger.Error(fmt.Sprintf("Request failed for keyword [%s]: %v", keyword, err))
 		return
@@ -85,7 +91,7 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string) {
 	}
 
 	// 2. DFS Strategy
-	if searchRes.Count >= 10000 && len(keyword) < 5 { // Limit depth to 5 chars to avoid infinite loops
+	if searchRes.Count >= 10000 && len(keyword) < 5 {
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has %d results. Deepening DFS...", keyword, searchRes.Count))
 		for _, char := range alphabet {
 			pc.KeywordChan <- keyword + string(char)
@@ -93,22 +99,27 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string) {
 	} else if searchRes.Count > 0 {
 		// 3. Process results and Paginate
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping...", keyword, searchRes.Count))
-		pc.scrapeAllPages(keyword, searchRes.Count)
+		pc.scrapeAllPages(keyword, searchRes.Count, client, token)
 	}
 }
 
-func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int) {
+func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client *http.Client, token string) {
 	totalPages := (totalCount / 100) + 1
-	if totalPages > 100 { totalPages = 100 } // Docker Hub search API hard limit is 100 pages
+	if totalPages > 100 { totalPages = 100 }
 
 	for page := 1; page <= totalPages; page++ {
 		url := myutils.GetRegURL(keyword, "community", fmt.Sprintf("%d", page), "100")
-		pc.processPage(url)
+		pc.processPage(url, client, token)
 	}
 }
 
-func (pc *ParallelCrawler) processPage(url string) {
-	resp, err := pc.HTTPClient.Get(url)
+func (pc *ParallelCrawler) processPage(url string, client *http.Client, token string) {
+	req, _ := http.NewRequest("GET", url, nil)
+	if token != "" {
+		req.Header.Add("Authorization", "JWT "+token)
+	}
+	
+	resp, err := client.Do(req)
 	if err != nil {
 		myutils.Logger.Error(fmt.Sprintf("Page request failed: %v", err))
 		return
@@ -121,7 +132,6 @@ func (pc *ParallelCrawler) processPage(url string) {
 	}
 
 	for _, repo := range searchRes.Results {
-		// Save to MongoDB
 		if myutils.GlobalDBClient.MongoFlag {
 			err := myutils.GlobalDBClient.Mongo.UpsertRepository(&repo)
 			if err != nil {
