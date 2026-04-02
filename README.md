@@ -14,20 +14,50 @@ A estratégia de seleção e priorização baseia-se no framework **DITector** e
     *   **Network Exposure:** Filtro de containers que possuem diretivas `EXPOSE` ou configurações de rede vulneráveis.
 4.  **Scan Dinâmico:** Automação do setup dos containers de rede e escaneamento via OpenVAS.
 
+---
+
+## 🚀 Como Executar o Crawler (Modo Pesquisa)
+
+### 1. Preparação (Docker Hub Accounts)
+Crie um arquivo `accounts.json` na raiz do projeto (não commitado):
+```json
+[
+  { "username": "seu_user", "password": "sua_password" }
+]
+```
+
+### 2. Execução Distribuída (Meet-in-the-Middle)
+Divida o alfabeto entre duas ou mais máquinas para acelerar a descoberta:
+
+**Máquina 1 (GPU1 - Letra A):**
+```bash
+docker run -d --name ditector_gpu1 -v $(pwd):/app -w /app --network host golang:1.22 \
+go run main.go crawl --workers 50 --seed 'a' --accounts accounts.json
+```
+
+**Máquina 2 (A9 - Letra N):**
+```bash
+docker run -d --name ditector_a9 -v $(pwd):/app -w /app --network host golang:1.22 \
+go run main.go crawl --workers 50 --seed 'n' --accounts accounts.json
+```
+
+### 3. Monitoramento dos Logs
+Para ver o crawler logando e descobrindo repositórios em tempo real:
+```bash
+docker logs -f ditector_gpu1
+```
+
+---
+
 ## Roadmap de Desenvolvimento
 - [x] Fork do repositório original.
-- [ ] Implementação do Parallel/Distributed Crawler em Go.
-- [ ] Integração com Proxy Pooling e Rotação de Contas.
+- [x] Implementação do Parallel DFS Crawler em Go.
+- [x] Integração com Auto-Login e Rotação de Contas.
 - [ ] Otimização do cálculo de pesos de dependência no Neo4j.
 - [ ] Script de exportação para dataset de scan do OpenVAS.
 
-## Framework DITector original
-O framework original foi desenvolvido pela Shanghai Jiao Tong University para detectar cinco tipos de ameaças:
-- Parâmetros de comando sensíveis
-- Vazamento de segredos (Secrets)
-- Vulnerabilidades de software (SCA)
-- Má configuração (Misconfigurations)
-- Arquivos maliciosos
-
 ---
-*Este fork foca na expansão das capacidades de crawling e no escaneamento de rede dinâmico.*
+## Framework DITector original
+O framework original foi desenvolvido pela Shanghai Jiao Tong University para detectar cinco tipos de ameaças. Este fork foca na expansão das capacidades de crawling e no escaneamento de rede dinâmico.
+
+*Veja o [CHANGELOG.md](./CHANGELOG.md) para detalhes técnicos das mudanças.*
