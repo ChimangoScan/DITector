@@ -121,9 +121,7 @@ func repoWorker(repoChan chan *myutils.Repository, jobChan chan GraphJob, tagCnt
 func buildGraphWorker(jobChan chan GraphJob) {
 	for job := range jobChan {
 		id := fmt.Sprintf("%s/%s/%s:%s@%s", job.Registry, job.RepoNamespace, job.RepoName, job.TagName, job.ImageMeta.Digest)
-		err := myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(id, job.ImageMeta)
-		if err != nil {
-			myutils.Logger.Error(fmt.Sprintf("Erro Neo4j [%s]: %v", id, err))
-		}
+		myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(id, job.ImageMeta)
+		myutils.Logger.Info(fmt.Sprintf("Inserido no Neo4j: %s", id))
 	}
 }
