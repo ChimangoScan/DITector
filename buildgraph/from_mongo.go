@@ -2,7 +2,6 @@ package buildgraph
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 	"sync"
 	"time"
