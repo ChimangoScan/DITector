@@ -70,7 +70,7 @@ func (pc *ParallelCrawler) worker() {
 
 func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) {
 	// 1. Check first page to get count
-	url := myutils.GetRegURL(keyword, "community", "1", "100")
+	url := myutils.GetV2SearchURL(keyword, 1, 100)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	if token != "" {
@@ -115,7 +115,7 @@ func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client
 	if totalPages > 100 { totalPages = 100 }
 
 	for page := 1; page <= totalPages; page++ {
-		url := myutils.GetRegURL(keyword, "community", fmt.Sprintf("%d", page), "100")
+		url := myutils.GetV2SearchURL(keyword, page, 100)
 		pc.processPage(url, client, token)
 	}
 }

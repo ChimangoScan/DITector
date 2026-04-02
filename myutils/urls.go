@@ -11,6 +11,7 @@ const (
 	RepoTagsURLTemplate           = `https://hub.docker.com/v2/repositories/%s/%s/tags/?page=%d&page_size=%d`
 	TagMetadataURLTemplate        = `https://hub.docker.com/v2/repositories/%s/%s/tags/%s`
 	ImageMetadataURLTemplate      = `https://hub.docker.com/v2/repositories/%s/%s/tags/%s/images`
+	V2SearchURLTemplate           = `https://hub.docker.com/v2/search/repositories/?query=%s&page=%d&page_size=%d`
 )
 
 // GetRegURL 返回用于获取repository list的URL
@@ -56,4 +57,9 @@ func GetTagMetadataURL(namespace, repo, tag string) string {
 // 对于支持多种内核架构的Tag，会以列表形式记录每个架构下的构建信息。
 func GetImageMetadataURL(namespace, repo, tag string) string {
 	return fmt.Sprintf(ImageMetadataURLTemplate, namespace, repo, tag)
+}
+
+// GetV2SearchURL returns the official V2 search API URL
+func GetV2SearchURL(query string, page, size int) string {
+	return fmt.Sprintf(V2SearchURLTemplate, query, page, size)
 }
