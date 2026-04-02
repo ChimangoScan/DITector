@@ -12,12 +12,6 @@ import (
 // Alphabet for DFS keyword generation
 const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-_"
 
-// RepositorySearchResponse for parsing Docker Hub search results
-type RepositorySearchResponse struct {
-	Count   int                 `json:"count"`
-	Results []myutils.Repository `json:"results"`
-}
-
 // ParallelCrawler handles the distributed crawling logic
 type ParallelCrawler struct {
 	WorkerCount int
@@ -68,8 +62,21 @@ func (pc *ParallelCrawler) worker() {
 	}
 }
 
+type V2Repository struct {
+	RepoName  string `json:"repo_name"`
+	RepoOwner string `json:"repo_owner"`
+	PullCount int64  `json:"pull_count"`
+}
+
+type V2SearchResponse struct {
+	Count      int            `json:"count"`
+	Repositories []V2Repository `json:"summaries"`
+}
+
 func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) {
-	// 1. Check first page to get count
+	// Add a small delay between keywords to avoid 429
+	time.Sleep(500 * time.Millisecond)
+
 	url := myutils.GetV2SearchURL(keyword, 1, 100)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -84,12 +91,18 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 429 {
+		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] got 429. Sleeping 30s...", keyword))
+		time.Sleep(30 * time.Second)
+		return
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] got status %d", keyword, resp.StatusCode))
 		return
 	}
 
-	var searchRes RepositorySearchResponse
+	var searchRes V2SearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
 		myutils.Logger.Error(fmt.Sprintf("JSON decode failed for keyword [%s]: %v", keyword, err))
 		return
@@ -102,7 +115,6 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 			pc.KeywordChan <- keyword + string(char)
 		}
 	} else if searchRes.Count > 0 {
-		// 3. Process results and Paginate
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping...", keyword, searchRes.Count))
 		pc.scrapeAllPages(keyword, searchRes.Count, client, token)
 	} else {
@@ -117,6 +129,7 @@ func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client
 	for page := 1; page <= totalPages; page++ {
 		url := myutils.GetV2SearchURL(keyword, page, 100)
 		pc.processPage(url, client, token)
+		time.Sleep(200 * time.Millisecond) // Pagination delay
 	}
 }
 
@@ -134,15 +147,27 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 	}
 	defer resp.Body.Close()
 
-	var searchRes RepositorySearchResponse
+	if resp.StatusCode == 429 {
+		time.Sleep(10 * time.Second)
+		return
+	}
+
+	var searchRes V2SearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
 		return
 	}
 
-	for _, repo := range searchRes.Results {
-		myutils.Logger.Info(fmt.Sprintf("Discovered repository: %s/%s", repo.Namespace, repo.Name))
+	for _, v2repo := range searchRes.Repositories {
+		repo := &myutils.Repository{
+			Namespace: v2repo.RepoOwner,
+			Name:      v2repo.RepoName,
+			PullCount: v2repo.PullCount,
+		}
+		if repo.Name == "" { continue }
+
+		myutils.Logger.Info(fmt.Sprintf("Discovered repository: %s/%s (%d pulls)", repo.Namespace, repo.Name, repo.PullCount))
 		if myutils.GlobalDBClient.MongoFlag {
-			err := myutils.GlobalDBClient.Mongo.UpdateRepository(&repo)
+			err := myutils.GlobalDBClient.Mongo.UpdateRepository(repo)
 			if err != nil {
 				myutils.Logger.Error(fmt.Sprintf("Failed to update repo %s/%s: %v", repo.Namespace, repo.Name, err))
 			}
