@@ -105,6 +105,8 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 		// 3. Process results and Paginate
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping...", keyword, searchRes.Count))
 		pc.scrapeAllPages(keyword, searchRes.Count, client, token)
+	} else {
+		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] returned 0 results.", keyword))
 	}
 }
 
@@ -138,6 +140,7 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 	}
 
 	for _, repo := range searchRes.Results {
+		myutils.Logger.Info(fmt.Sprintf("Discovered repository: %s/%s", repo.Namespace, repo.Name))
 		if myutils.GlobalDBClient.MongoFlag {
 			err := myutils.GlobalDBClient.Mongo.UpdateRepository(&repo)
 			if err != nil {
