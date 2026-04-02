@@ -73,9 +73,9 @@ func LoadConfigFromFile(configFilepath string, logLevel int) {
 	// _, filename, _, _ := runtime.Caller(0)
 	// root := path.Dir(path.Dir(filename))
 
-	root, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	root, err := os.Getwd()
 	if err != nil {
-		log.Fatalln("[ERROR] get executable dir path failed, got err:", err)
+		log.Fatalln("[ERROR] get working dir path failed, got err:", err)
 	}
 	// fmt.Println(root)
 
