@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -92,3 +93,32 @@ func (im *IdentityManager) GetNextClient() (*http.Client, string) {
 
 // In a real implementation, you'd add a method here to Login to Docker Hub
 // and refresh tokens when they expire.
+tp.Transport{}
+	
+	if len(im.Proxies) > 0 {
+		proxyURL, _ := url.Parse(im.Proxies[im.proxyIdx])
+		transport.Proxy = http.ProxyURL(proxyURL)
+		im.proxyIdx = (im.proxyIdx + 1) % len(im.Proxies)
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   20 * time.Second,
+	}
+
+	var authToken string
+	if len(im.Accounts) > 0 {
+		acc := im.Accounts[im.accIdx]
+		// Auto-login if token is empty
+		if acc.Token == "" {
+			err := im.LoginDockerHub(acc)
+			if err != nil {
+				myutils.Logger.Error(fmt.Sprintf("Auto-login failed for %s: %v", acc.Username, err))
+			}
+		}
+		authToken = acc.Token
+		im.accIdx = (im.accIdx + 1) % len(im.Accounts)
+	}
+
+	return client, authToken
+}

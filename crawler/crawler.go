@@ -37,7 +37,7 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 }
 
 // Start initiates the parallel crawl
-func (pc *ParallelCrawler) Start() {
+func (pc *ParallelCrawler) Start(seed string) {
 	myutils.Logger.Info(fmt.Sprintf("Starting Parallel Crawler with %d workers", pc.WorkerCount))
 
 	// Launch workers
@@ -47,8 +47,13 @@ func (pc *ParallelCrawler) Start() {
 	}
 
 	// Initial seed keywords
-	for _, char := range alphabet {
-		pc.KeywordChan <- string(char)
+	if seed != "" {
+		myutils.Logger.Info(fmt.Sprintf("Seeding crawler with: %s", seed))
+		pc.KeywordChan <- seed
+	} else {
+		for _, char := range alphabet {
+			pc.KeywordChan <- string(char)
+		}
 	}
 
 	// Wait for workers to finish

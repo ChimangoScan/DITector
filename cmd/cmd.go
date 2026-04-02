@@ -68,6 +68,7 @@ var crawlCmd = &cobra.Command{
 		workers, _ := cmd.Flags().GetInt("workers")
 		proxyFile, _ := cmd.Flags().GetString("proxies")
 		accountFile, _ := cmd.Flags().GetString("accounts")
+		seed, _ := cmd.Flags().GetString("seed")
 
 		im, err := crawler.LoadIdentities(proxyFile, accountFile)
 		if err != nil {
@@ -75,7 +76,7 @@ var crawlCmd = &cobra.Command{
 		}
 
 		pc := crawler.NewParallelCrawler(workers, im)
-		pc.Start()
+		pc.Start(seed)
 	},
 }
 
@@ -271,6 +272,11 @@ func init() {
 		crawlCmd,
 		calculateCmd,
 		buildCmd,
+		analyzeCmd,
+		executeCmd,
+	)
+}
+ildCmd,
 		analyzeCmd,
 		executeCmd,
 	)
