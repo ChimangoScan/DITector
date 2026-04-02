@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/NSSL-SJTU/DITector/analyzer"
@@ -69,14 +70,35 @@ var crawlCmd = &cobra.Command{
 		proxyFile, _ := cmd.Flags().GetString("proxies")
 		accountFile, _ := cmd.Flags().GetString("accounts")
 		seed, _ := cmd.Flags().GetString("seed")
+		shard, _ := cmd.Flags().GetInt("shard")
+		shards, _ := cmd.Flags().GetInt("shards")
 
 		im, err := crawler.LoadIdentities(proxyFile, accountFile)
 		if err != nil {
 			log.Fatalf("Failed to load identities: %v", err)
 		}
 
+		// Determine seeds using the following priority:
+		//   1. --shard N --shards M  → meet-in-the-middle: explore 1/M of the alphabet
+		//   2. --seed a,b,c          → explicit comma-separated keywords
+		//   3. (nothing)             → full alphabet (backward-compatible default)
+		var seeds []string
+		if shards > 1 && shard >= 0 {
+			if shard >= shards {
+				log.Fatalf("--shard %d must be < --shards %d", shard, shards)
+			}
+			seeds = crawler.ShardSeeds(shard, shards)
+			myutils.Logger.Info(fmt.Sprintf("Meet-in-the-middle: shard %d/%d → %d root keywords", shard, shards, len(seeds)))
+		} else if seed != "" {
+			seeds = strings.Split(seed, ",")
+			for i, s := range seeds {
+				seeds[i] = strings.TrimSpace(s)
+			}
+		}
+		// len(seeds)==0 → Start() seeds the full alphabet
+
 		pc := crawler.NewParallelCrawler(workers, im)
-		pc.Start(seed)
+		pc.Start(seeds)
 	},
 }
 
@@ -238,7 +260,9 @@ func init() {
 	crawlCmd.Flags().IntP("workers", "w", 10, "number of parallel crawler workers")
 	crawlCmd.Flags().String("proxies", "", "path to proxies file (one per line)")
 	crawlCmd.Flags().String("accounts", "", "path to accounts JSON file")
-	crawlCmd.Flags().String("seed", "", "initial seed keyword for DFS (e.g., 'a' or 'n')")
+	crawlCmd.Flags().String("seed", "", "comma-separated root keywords for DFS (e.g., 'nginx' or 'a,b,c')")
+	crawlCmd.Flags().Int("shard", -1, "shard index (0-based) for meet-in-the-middle crawl; requires --shards")
+	crawlCmd.Flags().Int("shards", 1, "total number of shards for meet-in-the-middle crawl (e.g., 2)")
 
 	// calculateCmd
 	calculateCmd.Flags().String("digest", "", "digest of the image to calculate the node id in Neo4j")
