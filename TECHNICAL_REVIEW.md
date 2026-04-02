@@ -31,14 +31,22 @@ Este documento detalha as modificações realizadas no framework DITector para v
 *   **Racional Técnico:** A API V2 oferece maior estabilidade e consistência nos metadados retornados em comparação com endpoints de interface web, garantindo a integridade dos campos `pull_count` e identificadores de repositório.
 
 ## 3. Análise de Persistência e Idempotência
-O sistema foi projetado sob o princípio da **Idempotência de Escrita**. Toda descoberta é processada via `UpdateRepository` no MongoDB com a flag `upsert: true`.
-*   **Recuperação de Falhas:** O estado do banco de dados permanece íntegro após interrupções. A retomada da varredura é coordenada via flag `--seed`, permitindo que o pesquisador divida o espaço de busca alfabética de forma arbitrária entre instâncias independentes.
+...
 
-## 4. Metodologia de Construção do Grafo (Layers)
-Embora a fase de descoberta foque em metadados de catálogo, o framework está preparado para o estágio de extração de dependências:
-1.  **Mapeamento de Tags:** Utilização do método `ReqTagsMetadata` para listar todas as versões de uma imagem.
-2.  **Extração de Camadas:** O módulo `ReqImagesMetadata` recupera a lista de SHAs das camadas que compõem cada imagem.
-3.  **Relacionamento em Grafo:** Estes SHAs são utilizados como nós no **Neo4j**, onde uma aresta de dependência é criada sempre que uma imagem compartilha a mesma pilha de camadas de uma imagem base, permitindo a análise de propagação de vulnerabilidades na cadeia de suprimentos.
+## 4. Análise Empírica de Performance
+Durante a fase de testes, foram observadas as seguintes métricas de desempenho:
+*   **Taxa de Descoberta (Crawl):** ~15 a 20 repositórios/segundo. O gargalo é puramente o Rate Limit da API de Busca.
+*   **Taxa de Extração de Dependências (Build):** ~0.3 repositórios/segundo. Esta fase é significativamente mais onerosa, pois exige múltiplas chamadas por repositório (Tags -> Manifests -> Layers).
 
-## 5. Conclusão
-A arquitetura atual do fork `DITector` evoluiu de um script de análise estática para um sistema de coleta de dados distribuído e resiliente. A conformidade com os princípios SOLID e o tratamento rigoroso de casos de borda (Rate Limits, Expiração de Sessão) tornam a ferramenta apta para a condução de pesquisas de segurança em larga escala.
+### Estimativa de Tempo (ETL)
+Para uma amostra de 100.000 repositórios, estima-se um tempo de processamento de aproximadamente 92 horas em uma única instância. Para o ecossistema total (12M repositórios), o tempo projetado excede 1 ano, tornando a extração exaustiva inviável sem uma frota massiva de instâncias.
+
+## 5. Estratégia de Otimização e Priorização (Filtro de Rede)
+Para viabilizar o escaneamento via OpenVAS em tempo hábil, a metodologia de extração será alterada de exaustiva para seletiva:
+
+1.  **Priorização por Popularidade:** A fase de `Build` será restrita a repositórios com `pull_count` superior a um limite estatístico (ex: > 10.000 pulls).
+2.  **Identificação de Serviços de Rede:** Aplicação de filtros heurísticos no MongoDB para identificar containers que operam como servidores (keywords: *server, api, http, sql*).
+3.  **Mapeamento de Layers Críticas:** O foco do Neo4j será identificar imagens base (como `debian`, `alpine`, `node`) que possuem o maior "Dependency Weight", permitindo que o scan dinâmico seja direcionado aos nós mais influentes da cadeia de suprimentos.
+
+## 6. Conclusão
+...
