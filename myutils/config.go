@@ -162,14 +162,24 @@ func connectDBs() {
 	}
 
 	// 连接Neo4j
-	// TODO: Neo4j连接返回的err不正确，目前永远为nil
-	if GlobalDBClient.Neo4j, err = NewNeo4jDriverGlobalConfig(); err != nil {
+	// Neo4j connection is optional for Stage I (crawl).
+	GlobalDBClient.Neo4j, err = NewNeo4jDriverGlobalConfig()
+	if err != nil {
 		GlobalDBClient.Neo4jFlag = false
-		Logger.Error("connect to Neo4j failed with:", err.Error())
-		fmt.Println("[-] Connect to Neo4j failed")
+		Logger.Warn(fmt.Sprintf("Neo4j connection failed (optional): %v", err))
+		fmt.Println("[-] Connect to Neo4j failed (optional)")
 	} else {
-		GlobalDBClient.Neo4jFlag = true
-		fmt.Println("[+] Connect to Neo4j")
+		// Verify connection with a timeout to avoid hanging
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := GlobalDBClient.Neo4j.Driver.VerifyConnectivity(ctx); err != nil {
+			GlobalDBClient.Neo4jFlag = false
+			Logger.Warn(fmt.Sprintf("Neo4j connectivity check failed: %v", err))
+			fmt.Println("[-] Connect to Neo4j failed (connectivity check)")
+		} else {
+			GlobalDBClient.Neo4jFlag = true
+			fmt.Println("[+] Connect to Neo4j")
+		}
 	}
 }
 
