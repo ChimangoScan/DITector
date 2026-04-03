@@ -1,14 +1,17 @@
 package crawler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // pageConcurrency controls how many pages of a single keyword are fetched in
@@ -41,16 +44,83 @@ const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-_"
 type ParallelCrawler struct {
 	WorkerCount int
 	KeywordChan chan string
+	RepoChan    chan *myutils.Repository
 	WG          sync.WaitGroup
 	IM          *IdentityManager
+	crawledKeys sync.Map // cache for already crawled keywords
 }
 
 // NewParallelCrawler initializes a new crawler
 func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
-	return &ParallelCrawler{
+	pc := &ParallelCrawler{
 		WorkerCount: workers,
 		KeywordChan: make(chan string, 1000000),
+		RepoChan:    make(chan *myutils.Repository, 100000),
 		IM:          im,
+	}
+	pc.loadCrawledKeywords()
+	return pc
+}
+
+// loadCrawledKeywords warms up the in-memory cache from MongoDB.
+func (pc *ParallelCrawler) loadCrawledKeywords() {
+	if !myutils.GlobalDBClient.MongoFlag {
+		return
+	}
+	myutils.Logger.Info("Warming up keyword cache from MongoDB...")
+	ctx := context.Background()
+	cursor, err := myutils.GlobalDBClient.Mongo.KeywordsColl.Find(ctx, bson.M{})
+	if err != nil {
+		myutils.Logger.Error(fmt.Sprintf("Failed to load keyword cache: %v", err))
+		return
+	}
+	defer cursor.Close(ctx)
+
+	count := 0
+	for cursor.Next(ctx) {
+		var doc struct {
+			ID string `bson:"_id"`
+		}
+		if err := cursor.Decode(&doc); err == nil {
+			pc.crawledKeys.Store(doc.ID, true)
+			count++
+		}
+	}
+	myutils.Logger.Info(fmt.Sprintf("Loaded %d keywords into cache", count))
+}
+
+// repoWriter aggregates repositories and performs large bulk writes.
+func (pc *ParallelCrawler) repoWriter() {
+	buffer := make([]*myutils.Repository, 0, 5000)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	flush := func() {
+		if len(buffer) == 0 {
+			return
+		}
+		if err := myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(buffer); err != nil {
+			myutils.Logger.Error(fmt.Sprintf("Bulk write failed: %v", err))
+		} else {
+			myutils.Logger.Info(fmt.Sprintf("Flushed %d repositories to MongoDB", len(buffer)))
+		}
+		buffer = buffer[:0]
+	}
+
+	for {
+		select {
+		case repo, ok := <-pc.RepoChan:
+			if !ok {
+				flush()
+				return
+			}
+			buffer = append(buffer, repo)
+			if len(buffer) >= 5000 {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		}
 	}
 }
 
@@ -90,6 +160,9 @@ func ShardSeeds(shard, total int) []string {
 func (pc *ParallelCrawler) Start(seeds []string) {
 	myutils.Logger.Info(fmt.Sprintf("Starting Parallel Crawler with %d workers", pc.WorkerCount))
 
+	// Start background writer
+	go pc.repoWriter()
+
 	for i := 0; i < pc.WorkerCount; i++ {
 		pc.WG.Add(1)
 		go pc.worker()
@@ -108,6 +181,7 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 	}
 
 	pc.WG.Wait()
+	close(pc.RepoChan)
 }
 
 // worker pulls keywords from the channel and processes them. The identity
@@ -136,8 +210,8 @@ type V2SearchResponse struct {
 // identity to use for the next keyword. On 429 the keyword is re-enqueued
 // and a fresh identity is returned immediately — no sleep.
 func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) (*http.Client, string) {
-	if myutils.GlobalDBClient.MongoFlag && myutils.GlobalDBClient.Mongo.IsKeywordCrawled(keyword) {
-		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] already crawled, skipping", keyword))
+	if _, crawled := pc.crawledKeys.Load(keyword); crawled {
+		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] already crawled (cache), skipping", keyword))
 		return client, token
 	}
 
@@ -182,15 +256,19 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 	} else if searchRes.Count > 0 {
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping...", keyword, searchRes.Count))
 		pc.scrapeAllPages(keyword, searchRes.Count, client, token)
+		pc.crawledKeys.Store(keyword, true)
 		if myutils.GlobalDBClient.MongoFlag {
-			if err := myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword); err != nil {
-				myutils.Logger.Error(fmt.Sprintf("MarkKeywordCrawled [%s] failed: %v", keyword, err))
-			}
+			go func(k string) {
+				if err := myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(k); err != nil {
+					myutils.Logger.Error(fmt.Sprintf("MarkKeywordCrawled [%s] failed: %v", k, err))
+				}
+			}(keyword)
 		}
 	} else {
 		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] returned 0 results.", keyword))
+		pc.crawledKeys.Store(keyword, true)
 		if myutils.GlobalDBClient.MongoFlag {
-			_ = myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
+			go myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
 		}
 	}
 	return client, token
@@ -266,24 +344,15 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 }
 
 func (pc *ParallelCrawler) saveRepos(v2repos []V2Repository) {
-	repos := make([]*myutils.Repository, 0, len(v2repos))
 	for _, v2repo := range v2repos {
 		if v2repo.RepoName == "" {
 			continue
 		}
 		ns, name := parseRepoName(v2repo.RepoName)
-		repos = append(repos, &myutils.Repository{
+		pc.RepoChan <- &myutils.Repository{
 			Namespace: ns,
 			Name:      name,
 			PullCount: v2repo.PullCount,
-		})
-	}
-	if len(repos) > 0 {
-		myutils.Logger.Debug(fmt.Sprintf("Page discovered %d repos", len(repos)))
-		if myutils.GlobalDBClient.MongoFlag {
-			if err := myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(repos); err != nil {
-				myutils.Logger.Error(fmt.Sprintf("BulkUpsert failed: %v", err))
-			}
 		}
 	}
 }
