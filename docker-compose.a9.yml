@@ -1,0 +1,46 @@
+# docker-compose.a9.yml — crawler shard 1 for second crawl node
+#
+# This file runs ONLY the crawler (no local MongoDB/Neo4j).
+# It connects to the shared MongoDB on gpu1.
+#
+# SETUP ON node2:
+#   1. Copy the entire repo to a9:
+#        git clone https://github.com/CristhianKapelinski/DITector.git
+#        cd DITector
+#        git pull
+#   2. Copy accounts_node2.json and config.yaml from node1 (these are .gitignored):
+#        scp node1:/path/to/DITector/accounts_node2.json .
+#        scp node1:/path/to/DITector/config.yaml .
+#   3. Ensure gpu1's MongoDB port 27017 is reachable from a9.
+#      (The docker-compose.yml on node1 already binds MongoDB to 0.0.0.0:27017.)
+#   4. Start the shard:
+#        GPU1_IP=<gpu1-ip> docker compose -f docker-compose.a9.yml up -d
+#
+# The MONGO_URI env var overrides the uri in config.yaml so no file edit is needed.
+
+version: '3.8'
+
+services:
+  crawler_node2:
+    image: golang:1.22
+    container_name: ditector_crawler_node2
+    volumes:
+      - .:/app
+    working_dir: /app
+    network_mode: host
+    environment:
+      # Override MongoDB URI to point at gpu1's shared instance.
+      # Set GPU1_IP before running: export GPU1_IP=<gpu1 ip address>
+      - MONGO_URI=mongodb://${GPU1_IP:?GPU1_IP must be set}:27017
+      # Neo4j is only needed for Stage II (build), not for crawl.
+      # Point it at node1 too so Stage II can be run from a9 if needed.
+      - NEO4J_URI=neo4j://${GPU1_IP}:7687
+    # Meet-in-the-middle: shard 1/2 covers keywords starting with t–_ (19 root chars).
+    # node1 runs docker-compose.yml with --shard 0 --shards 2 (a–s).
+    command: >
+      sh -c "go run main.go crawl
+        --workers 50
+        --shard 1
+        --shards 2
+        --accounts accounts_node2.json
+        --config config.yaml"

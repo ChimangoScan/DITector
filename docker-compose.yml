@@ -30,10 +30,15 @@ services:
       - .:/app
     working_dir: /app
     network_mode: host
-    environment:
-      - SEED=${SEED:-a}
+    # Meet-in-the-middle: shard 0/2 covers keywords starting with a–s (19 root chars).
+    # Machine node2 runs docker-compose.node2.yml with --shard 1 --shards 2 (t–_).
     command: >
-      sh -c "go run main.go crawl --workers 50 --seed $$SEED --accounts accounts.json"
+      sh -c "go run main.go crawl
+        --workers 50
+        --shard 0
+        --shards 2
+        --accounts accounts_node1.json
+        --config config.yaml"
 
 volumes:
   mongo_data:

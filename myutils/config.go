@@ -87,6 +87,17 @@ func LoadConfigFromFile(configFilepath string, logLevel int) {
 		log.Fatalf("[ERROR] Json failed to unmarshal %s with err: %v\n", configFilepath, err)
 	}
 
+	// Environment variable overrides — allow remote machines to point at a
+	// shared MongoDB/Neo4j without needing a separate config file.
+	//   MONGO_URI=mongodb://gpu1-ip:27017
+	//   NEO4J_URI=neo4j://gpu1-ip:7687
+	if v := os.Getenv("MONGO_URI"); v != "" {
+		GlobalConfig.MongoConfig.URI = v
+	}
+	if v := os.Getenv("NEO4J_URI"); v != "" {
+		GlobalConfig.Neo4jConfig.Neo4jURI = v
+	}
+
 	fmt.Println(GlobalConfig.MongoConfig.URI, GlobalConfig.MongoConfig.Database, GlobalConfig.MongoConfig.Collections)
 
 	// 配置最大线程数

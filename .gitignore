@@ -21,4 +21,6 @@ pkg/
 *result.json
 ditector
 accounts.json
+accounts_gpu1.json
+accounts_a9.json
 docker-scan
