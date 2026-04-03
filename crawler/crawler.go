@@ -1,7 +1,6 @@
 package crawler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,8 +10,6 @@ import (
 	"time"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
-	"go.mongodb.org/mongo-driver/bson"
-	mongodb_opts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // pageConcurrency controls how many pages of a single keyword are fetched in
@@ -59,37 +56,7 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 		RepoChan:    make(chan *myutils.Repository, 100000),
 		IM:          im,
 	}
-	pc.loadCrawledKeywords()
 	return pc
-}
-
-// loadCrawledKeywords warms up the in-memory cache from MongoDB.
-func (pc *ParallelCrawler) loadCrawledKeywords() {
-	if !myutils.GlobalDBClient.MongoFlag {
-		return
-	}
-	myutils.Logger.Info("Warming up keyword cache from MongoDB (ID projection)...")
-	ctx := context.Background()
-	// Only fetch _id to reduce network and memory overhead
-	opts := mongodb_opts.Find().SetProjection(bson.M{"_id": 1})
-	cursor, err := myutils.GlobalDBClient.Mongo.KeywordsColl.Find(ctx, bson.M{}, opts)
-	if err != nil {
-		myutils.Logger.Error(fmt.Sprintf("Failed to load keyword cache: %v", err))
-		return
-	}
-	defer cursor.Close(ctx)
-
-	count := 0
-	for cursor.Next(ctx) {
-		var doc struct {
-			ID string `bson:"_id"`
-		}
-		if err := cursor.Decode(&doc); err == nil {
-			pc.crawledKeys.Store(doc.ID, true)
-			count++
-		}
-	}
-	myutils.Logger.Info(fmt.Sprintf("Cache ready: %d keywords loaded", count))
 }
 
 // repoWriter aggregates repositories and performs large bulk writes.
@@ -235,11 +202,6 @@ type V2SearchResponse struct {
 // identity to use for the next keyword. On 429 the keyword is re-enqueued
 // and a fresh identity is returned immediately — no sleep.
 func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) (*http.Client, string) {
-	if _, crawled := pc.crawledKeys.Load(keyword); crawled {
-		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] already crawled (cache), skipping", keyword))
-		return client, token
-	}
-
 	url := myutils.GetV2SearchURL(keyword, 1, 100)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -273,8 +235,18 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 		return client, token
 	}
 
+	// If we hit the 10k limit, DO NOT scrape this keyword. Instead, deepen the DFS
+	// immediately to avoid redundancy and ensure full coverage at more specific levels.
+	if searchRes.Count >= 10000 && len(keyword) < 255 {
+		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has >= 10000 results (%d). Deepening DFS directly...", keyword, searchRes.Count))
+		for _, char := range alphabet {
+			pc.KeywordChan <- keyword + string(char)
+		}
+		return client, token
+	}
+
 	if searchRes.Count > 0 {
-		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping first 100 pages...", keyword, searchRes.Count))
+		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping all pages...", keyword, searchRes.Count))
 		pc.scrapeAllPages(keyword, searchRes.Count, client, token)
 		pc.crawledKeys.Store(keyword, true)
 		if myutils.GlobalDBClient.MongoFlag {
@@ -284,15 +256,7 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 				}
 			}(keyword)
 		}
-	}
-
-	// Deepen if we hit the 10k limit to ensure we get the items beyond page 100
-	if searchRes.Count >= 10000 && len(keyword) < 255 {
-		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has >= 10000 results. Deepening DFS for full coverage...", keyword))
-		for _, char := range alphabet {
-			pc.KeywordChan <- keyword + string(char)
-		}
-	} else if searchRes.Count == 0 {
+	} else {
 		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] returned 0 results.", keyword))
 		pc.crawledKeys.Store(keyword, true)
 		if myutils.GlobalDBClient.MongoFlag {
