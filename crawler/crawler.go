@@ -4,16 +4,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
 // pageConcurrency controls how many pages of a single keyword are fetched in
-// parallel. With identity rotation on 429, we can afford more parallelism.
-const pageConcurrency = 8
+// parallel. Override with env var PAGE_CONCURRENCY (e.g. PAGE_CONCURRENCY=16).
+var pageConcurrency = func() int {
+	if v := os.Getenv("PAGE_CONCURRENCY"); v != "" {
+		var n int
+		fmt.Sscan(v, &n)
+		if n > 0 {
+			return n
+		}
+	}
+	return 8
+}()
 
 // parseRepoName splits "namespace/name" from the V2 API repo_name field.
 // Official images (e.g. "nginx") are treated as "library/nginx".
@@ -279,5 +288,3 @@ func (pc *ParallelCrawler) saveRepos(v2repos []V2Repository) {
 	}
 }
 
-// keep compiler happy — time is used in auth_proxy.go
-var _ = time.Second
