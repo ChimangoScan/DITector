@@ -60,13 +60,14 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	buffer := make([]*myutils.Repository, 0, 1000)
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	flush := func() {
 		if len(buffer) == 0 { return }
+		count := len(buffer)
 		_ = myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(buffer)
-		myutils.Logger.Info(fmt.Sprintf("Flushed %d unique repos", len(buffer)))
+		myutils.Logger.Info(fmt.Sprintf(">>> DATABASE UPDATE: Flushed %d NEW unique repos", count))
 		buffer = buffer[:0]
 	}
 
@@ -85,7 +86,6 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 func (pc *ParallelCrawler) Start(seeds []string) {
 	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [W:%d]", pc.WorkerCount))
 	
-	// Initialize task queue
 	if len(seeds) == 0 {
 		for _, ch := range alphabet { seeds = append(seeds, string(ch)) }
 	}
@@ -103,13 +103,8 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 		for {
 			p := atomic.LoadInt32(&pc.pending)
 			active, _ := myutils.GlobalDBClient.Mongo.KeywordsColl.CountDocuments(context.TODO(), bson.M{"status": "pending"})
-			if p == 0 && active == 0 {
-				time.Sleep(5 * time.Second)
-				active, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.CountDocuments(context.TODO(), bson.M{"status": "pending"})
-				if active == 0 { break }
-			}
-			myutils.Logger.Info(fmt.Sprintf("Progress: %d local active | %d tasks queued", p, active))
-			time.Sleep(10 * time.Second)
+			myutils.Logger.Info(fmt.Sprintf("Status: %d workers active | %d tasks in queue", p, active))
+			time.Sleep(15 * time.Second)
 		}
 	}()
 
@@ -133,22 +128,24 @@ func (pc *ParallelCrawler) ensureQueueInitialized(seeds []string) {
 	_, _ = coll.BulkWrite(context.TODO(), models)
 }
 
+// getNewHTTPClient creates a fresh, non-persistent client to avoid "Tarpit" effects.
+func (pc *ParallelCrawler) getNewHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives:     true, // Kill connection after each request
+			MaxIdleConns:          1,
+			IdleConnTimeout:       1 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 15 * time.Second,
+			TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper), // Force HTTP/1.1
+		},
+		Timeout: 30 * time.Second,
+	}
+}
+
 func (pc *ParallelCrawler) worker(id int) {
 	defer pc.WG.Done()
-	
-	// Optimized HTTP Client: Disabled HTTP/2 to prevent hang bugs with Cloudflare
-	tr := &http.Transport{
-		MaxIdleConns:          10,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 15 * time.Second,
-		TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper), // Forces HTTP/1.1
-	}
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   30 * time.Second,
-	}
+	client := pc.getNewHTTPClient()
 	_, token := pc.IM.GetNextClient()
 
 	for {
@@ -174,6 +171,8 @@ func (pc *ParallelCrawler) getNextTask() string {
 }
 
 func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token string) (*http.Client, string) {
+	myutils.Logger.Info(fmt.Sprintf("Processing Prefix: [%s]", prefix))
+	
 	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token, 0)
 	client, token = nextClient, nextToken
 	if res == nil {
@@ -181,14 +180,16 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		return client, token
 	}
 
-	pc.processResults(res.Repositories)
+	newInPrefix := pc.processResults(res.Repositories)
 	pages := (res.Count / 100) + 1
 	if pages > 100 { pages = 100 }
 	for p := 2; p <= pages; p++ {
 		time.Sleep(time.Duration(400 + rand.Intn(500)) * time.Millisecond)
 		resP, c, t := pc.fetchPage(prefix, p, client, token, 0)
 		client, token = c, t
-		if resP != nil { pc.processResults(resP.Repositories) }
+		if resP != nil { 
+			newInPrefix += pc.processResults(resP.Repositories)
+		}
 	}
 
 	if (res.Count >= 10000 || len(prefix) == 1) && len(prefix) < 255 {
@@ -198,6 +199,8 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		}
 		_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.BulkWrite(context.TODO(), models)
 	}
+	
+	myutils.Logger.Info(fmt.Sprintf("Finished Prefix [%s]: Added %d NEW repos", prefix, newInPrefix))
 	pc.updateTaskStatus(prefix, "done")
 	return client, token
 }
@@ -214,18 +217,21 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 
 	resp, err := client.Do(req)
 	if err != nil {
-		myutils.Logger.Error(fmt.Sprintf("Request failed for %q page %d: %v", query, page, err))
-		return nil, client, token
+		myutils.Logger.Error(fmt.Sprintf("Network Error for %q: %v. Refreshing connection...", query, err))
+		return nil, pc.getNewHTTPClient(), token
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
 		if backoff == 0 { backoff = 10 * time.Second } else { backoff *= 2 }
 		if backoff > 15 * time.Minute { backoff = 15 * time.Minute }
-		myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q page %d. Backoff: %v", query, page, backoff))
+		
+		myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q. Backoff: %v. Rotating account...", query, backoff))
 		time.Sleep(backoff)
+		
 		newC, newT := pc.IM.GetNextClient()
-		return pc.fetchPage(query, page, newC, newT, backoff)
+		// Recursively retry with a FRESH client and increased backoff
+		return pc.fetchPage(query, page, pc.getNewHTTPClient(), newT, backoff)
 	}
 
 	if resp.StatusCode != http.StatusOK { return nil, client, token }
@@ -237,13 +243,16 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 func (pc *ParallelCrawler) processResults(repos []struct {
 	RepoName  string "json:\"repo_name\""
 	PullCount int64  "json:\"pull_count\""
-}) {
+}) int {
+	newCount := 0
 	for _, r := range repos {
 		if r.RepoName == "" { continue }
 		if _, seen := pc.seenRepos.LoadOrStore(r.RepoName, true); seen { continue }
 		ns, name := parseRepoName(r.RepoName)
 		pc.RepoChan <- &myutils.Repository{Namespace: ns, Name: name, PullCount: r.PullCount}
+		newCount++
 	}
+	return newCount
 }
 
 type V2SearchResponse struct {
