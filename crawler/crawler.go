@@ -5,20 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
 	"go.mongodb.org/mongo-driver/bson"
-	mongodb_opts "go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+var pageConcurrency = func() int {
+	if v := os.Getenv("PAGE_CONCURRENCY"); v != "" {
+		var n int
+		fmt.Sscan(v, &n)
+		if n > 0 { return n }
+	}
+	return 0 // Default to serial (Python-mimic) if not specified
+}()
 
 func parseRepoName(repoName string) (namespace, name string) {
 	parts := strings.SplitN(repoName, "/", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
+	if len(parts) == 2 { return parts[0], parts[1] }
 	return "library", repoName
 }
 
@@ -29,8 +39,8 @@ type ParallelCrawler struct {
 	RepoChan    chan *myutils.Repository
 	WG          sync.WaitGroup
 	IM          *IdentityManager
-	crawledKeys sync.Map // Rastreia keywords já feitas
-	seenRepos   sync.Map // Deduplicação em RAM (igual ao Python)
+	seenRepos   sync.Map
+	pending     int32
 }
 
 func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
@@ -41,27 +51,6 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 	}
 }
 
-func (pc *ParallelCrawler) loadState() {
-	if !myutils.GlobalDBClient.MongoFlag {
-		return
-	}
-	myutils.Logger.Info("Loading state from MongoDB...")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	opts := mongodb_opts.Find().SetProjection(bson.M{"_id": 1})
-	cursor, err := myutils.GlobalDBClient.Mongo.KeywordsColl.Find(ctx, bson.M{}, opts)
-	if err != nil {
-		return
-	}
-	defer cursor.Close(ctx)
-	for cursor.Next(ctx) {
-		var doc struct{ ID string `bson:"_id"` }
-		if err := cursor.Decode(&doc); err == nil {
-			pc.crawledKeys.Store(doc.ID, true)
-		}
-	}
-}
-
 func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	buffer := make([]*myutils.Repository, 0, 1000)
@@ -69,25 +58,18 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 	defer ticker.Stop()
 
 	flush := func() {
-		if len(buffer) == 0 {
-			return
-		}
+		if len(buffer) == 0 { return }
 		_ = myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(buffer)
-		myutils.Logger.Info(fmt.Sprintf("Flushed %d unique repos to MongoDB", len(buffer)))
+		myutils.Logger.Info(fmt.Sprintf("Flushed %d unique repos", len(buffer)))
 		buffer = buffer[:0]
 	}
 
 	for {
 		select {
 		case repo, ok := <-pc.RepoChan:
-			if !ok {
-				flush()
-				return
-			}
+			if !ok { flush(); return }
 			buffer = append(buffer, repo)
-			if len(buffer) >= 1000 {
-				flush()
-			}
+			if len(buffer) >= 1000 { flush() }
 		case <-ticker.C:
 			flush()
 		}
@@ -95,54 +77,194 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 }
 
 func (pc *ParallelCrawler) Start(seeds []string) {
-	pc.loadState()
-	myutils.Logger.Info(fmt.Sprintf("Starting Serial-Parallel Pipeline [W:%d]", pc.WorkerCount))
+	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [W:%d, PC:%d]", pc.WorkerCount, pageConcurrency))
+	
+	// Initialize task queue in MongoDB
+	if len(seeds) == 0 {
+		for _, ch := range alphabet { seeds = append(seeds, string(ch)) }
+	}
+	pc.ensureQueueInitialized(seeds)
 
 	writerDone := make(chan struct{})
 	go pc.repoWriter(context.Background(), writerDone)
 
-	// Distribui sementes iniciais entre os workers
-	if len(seeds) == 0 {
-		for _, ch := range alphabet {
-			seeds = append(seeds, string(ch))
-		}
-	}
-
-	// Canal local apenas para distribuir as sementes iniciais
-	seedChan := make(chan string, len(seeds))
-	for _, s := range seeds {
-		seedChan <- s
-	}
-	close(seedChan)
-
 	for i := 0; i < pc.WorkerCount; i++ {
 		pc.WG.Add(1)
-		go pc.worker(i, seedChan)
+		go pc.worker(i)
 	}
+
+	// Liveness Monitor
+	go func() {
+		for {
+			p := atomic.LoadInt32(&pc.pending)
+			active, _ := myutils.GlobalDBClient.Mongo.KeywordsColl.CountDocuments(context.TODO(), bson.M{"status": "pending"})
+			if p == 0 && active == 0 {
+				time.Sleep(5 * time.Second)
+				active, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.CountDocuments(context.TODO(), bson.M{"status": "pending"})
+				if active == 0 { break }
+			}
+			myutils.Logger.Info(fmt.Sprintf("Progress: %d local workers active | %d tasks in queue", p, active))
+			time.Sleep(10 * time.Second)
+		}
+		// No need to close a channel, workers will exit when getNextTask returns empty
+	}()
 
 	pc.WG.Wait()
 	close(pc.RepoChan)
 	<-writerDone
-	myutils.Logger.Info("Crawl Complete")
+	myutils.Logger.Info("Discovery Phase Complete")
 }
 
-func (pc *ParallelCrawler) worker(id int, seedChan <-chan string) {
+func (pc *ParallelCrawler) ensureQueueInitialized(seeds []string) {
+	if !myutils.GlobalDBClient.MongoFlag { return }
+	coll := myutils.GlobalDBClient.Mongo.KeywordsColl
+	count, _ := coll.CountDocuments(context.TODO(), bson.M{})
+	if count > 0 { return }
+
+	myutils.Logger.Info("Initializing task queue with root seeds...")
+	var models []mongo.WriteModel
+	for _, s := range seeds {
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(bson.M{"_id": s}).
+			SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).
+			SetUpsert(true))
+	}
+	_, _ = coll.BulkWrite(context.TODO(), models)
+}
+
+func (pc *ParallelCrawler) worker(id int) {
 	defer pc.WG.Done()
+	client, token := pc.IM.GetNextClient()
 	
 	// Strict Account Isolation
-	client, token := pc.IM.GetNextClient()
-	if pc.WorkerCount <= len(pc.IM.Accounts) {
+	if pc.WorkerCount == len(pc.IM.Accounts) {
 		acc := pc.IM.Accounts[id]
-		if acc.Token == "" {
-			pc.IM.LoginDockerHub(acc)
-		}
+		if acc.Token == "" { pc.IM.LoginDockerHub(acc) }
 		token = acc.Token
-		client = &http.Client{Timeout: 20 * time.Second}
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 
-	// Inicia DFS recursivo a partir das sementes
-	for seed := range seedChan {
-		client, token = pc.crawlDFS(seed, client, token)
+	for {
+		prefix := pc.getNextTask()
+		if prefix == "" { break }
+
+		atomic.AddInt32(&pc.pending, 1)
+		client, token = pc.processTask(prefix, client, token)
+		atomic.AddInt32(&pc.pending, -1)
+	}
+}
+
+func (pc *ParallelCrawler) getNextTask() string {
+	if !myutils.GlobalDBClient.MongoFlag { return "" }
+	coll := myutils.GlobalDBClient.Mongo.KeywordsColl
+	var doc struct{ ID string `bson:"_id"` }
+	
+	err := coll.FindOneAndUpdate(
+		context.TODO(),
+		bson.M{"status": "pending"},
+		bson.M{"$set": bson.M{"status": "processing", "started_at": time.Now()}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	).Decode(&doc)
+
+	if err != nil { return "" }
+	return doc.ID
+}
+
+func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token string) (*http.Client, string) {
+	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token)
+	client, token = nextClient, nextToken
+	if res == nil {
+		pc.updateTaskStatus(prefix, "pending")
+		return client, token
+	}
+
+	// Scrape
+	pc.processResults(res.Repositories)
+	if pageConcurrency > 0 {
+		pc.scrapeAllPages(prefix, res.Count, client, token)
+	} else {
+		// Serial fallback
+		pages := (res.Count / 100) + 1
+		if pages > 100 { pages = 100 }
+		for p := 2; p <= pages; p++ {
+			time.Sleep(200 * time.Millisecond)
+			resP, c, t := pc.fetchPage(prefix, p, client, token)
+			client, token = c, t
+			if resP != nil { pc.processResults(resP.Repositories) }
+		}
+	}
+
+	// Fan-out
+	if (res.Count >= 10000 || len(prefix) == 1) && len(prefix) < 255 {
+		var models []mongo.WriteModel
+		for _, char := range alphabet {
+			models = append(models, mongo.NewUpdateOneModel().
+				SetFilter(bson.M{"_id": prefix + string(char)}).
+				SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).
+				SetUpsert(true))
+		}
+		_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.BulkWrite(context.TODO(), models)
+	}
+
+	pc.updateTaskStatus(prefix, "done")
+	return client, token
+}
+
+func (pc *ParallelCrawler) updateTaskStatus(id, status string) {
+	_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.UpdateOne(
+		context.TODO(),
+		bson.M{"_id": id},
+		bson.M{"$set": bson.M{"status": status, "finished_at": time.Now()}},
+	)
+}
+
+func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client *http.Client, token string) {
+	totalPages := (totalCount / 100) + 1
+	if totalPages > 100 { totalPages = 100 }
+	sem := make(chan struct{}, pageConcurrency)
+	var wg sync.WaitGroup
+	for p := 1; p <= totalPages; p++ {
+		wg.Add(1); sem <- struct{}{}
+		go func(page int) {
+			defer wg.Done(); defer func() { <-sem }()
+			res, _, _ := pc.fetchPage(keyword, page, client, token)
+			if res != nil { pc.processResults(res.Repositories) }
+		}(p)
+	}
+	wg.Wait()
+}
+
+func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string) (*V2SearchResponse, *http.Client, string) {
+	url := myutils.GetV2SearchURL(query, page, 100)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	if token != "" { req.Header.Add("Authorization", "JWT "+token) }
+
+	resp, err := client.Do(req)
+	if err != nil { return nil, client, token }
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 {
+		myutils.Logger.Warn("429. Rotating...")
+		time.Sleep(10 * time.Second)
+		newC, newT := pc.IM.GetNextClient()
+		return pc.fetchPage(query, page, newC, newT)
+	}
+	if resp.StatusCode != http.StatusOK { return nil, client, token }
+	var res V2SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return nil, client, token }
+	return &res, client, token
+}
+
+func (pc *ParallelCrawler) processResults(repos []struct {
+	RepoName  string "json:\"repo_name\""
+	PullCount int64  "json:\"pull_count\""
+}) {
+	for _, r := range repos {
+		if r.RepoName == "" { continue }
+		if _, seen := pc.seenRepos.LoadOrStore(r.RepoName, true); seen { continue }
+		ns, name := parseRepoName(r.RepoName)
+		pc.RepoChan <- &myutils.Repository{Namespace: ns, Name: name, PullCount: r.PullCount}
 	}
 }
 
@@ -154,136 +276,13 @@ type V2SearchResponse struct {
 	} `json:"results"`
 }
 
-// crawlDFS is the recursive DFS function, mirroring the Python logic exactly.
-func (pc *ParallelCrawler) crawlDFS(prefix string, client *http.Client, token string) (*http.Client, string) {
-	if _, crawled := pc.crawledKeys.Load(prefix); crawled {
-		return client, token
-	}
-
-	myutils.Logger.Info(fmt.Sprintf("Prefix: [%s]", prefix))
-	
-	// Fetch Page 1 to get Total Count
-	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token)
-	client, token = nextClient, nextToken
-	
-	if res == nil {
-		return client, token // Falha de rede irrecuperável
-	}
-
-	total := res.Count
-	pages := (total / 100) + 1
-	if pages > 100 {
-		pages = 100
-	}
-
-	// Processa a página 1 que já foi baixada
-	pc.processResults(res.Repositories)
-
-	// Scrape Sequencial Constante (A mágica do Python)
-	for p := 2; p <= pages; p++ {
-		time.Sleep(200 * time.Millisecond) // Delay de 0.2s igual ao Python
-		
-		resPage, nextC, nextT := pc.fetchPage(prefix, p, client, token)
-		client, token = nextC, nextT
-		
-		if resPage == nil {
-			break
-		}
-		pc.processResults(resPage.Repositories)
-	}
-
-	// DFS Collision Logic
-	// Force deepening for 1-character prefixes because Docker Hub search
-	// often treats them as stopwords and returns falsely low counts.
-	if (total >= 10000 || len(prefix) == 1) && len(prefix) < 255 {
-		myutils.Logger.Info(fmt.Sprintf("Collision or root prefix on '%s'. Deepening search space...", prefix))
-		for _, char := range alphabet {
-			client, token = pc.crawlDFS(prefix+string(char), client, token)
-		}
-	}
-
-	// Save state
-	pc.crawledKeys.Store(prefix, true)
-	if myutils.GlobalDBClient.MongoFlag {
-		go func(k string) {
-			_ = myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(k)
-		}(prefix)
-	}
-
-	return client, token
-}
-
-func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string) (*V2SearchResponse, *http.Client, string) {
-	url := myutils.GetV2SearchURL(query, page, 100)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	if token != "" {
-		req.Header.Add("Authorization", "JWT "+token)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, client, token
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 429 {
-		myutils.Logger.Warn("Rate limited. Rotating identity and sleeping 10s...")
-		time.Sleep(10 * time.Second)
-		newClient, newToken := pc.IM.GetNextClient()
-		return pc.fetchPage(query, page, newClient, newToken)
-	}
-
-	if resp.StatusCode == 401 {
-		myutils.Logger.Warn(fmt.Sprintf("JWT expired or revoked for query %q page %d. Re-authenticating...", query, page))
-		pc.IM.ClearToken(token)
-		newClient, newToken := pc.IM.GetNextClient()
-		return pc.fetchPage(query, page, newClient, newToken)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		myutils.Logger.Error(fmt.Sprintf("Unexpected status %d for query %q page %d", resp.StatusCode, query, page))
-		return nil, client, token
-	}
-
-	var res V2SearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, client, token
-	}
-
-	return &res, client, token
-}
-
-func (pc *ParallelCrawler) processResults(repositories []struct {
-	RepoName  string "json:\"repo_name\""
-	PullCount int64  "json:\"pull_count\""
-}) {
-	for _, r := range repositories {
-		if r.RepoName == "" {
-			continue
-		}
-		
-		// 1. Deduplicação em Memória RAM (O(1)) - Idêntico ao Python
-		if _, seen := pc.seenRepos.LoadOrStore(r.RepoName, true); seen {
-			continue // Já vimos este repo, ignora (economiza rede e banco)
-		}
-
-		ns, name := parseRepoName(r.RepoName)
-		pc.RepoChan <- &myutils.Repository{Namespace: ns, Name: name, PullCount: r.PullCount}
-	}
-}
-
 func ShardSeeds(shard, total int) []string {
 	chars := []rune(alphabet)
 	n := len(chars)
 	size := n / total
 	start, end := shard*size, (shard+1)*size
-	if shard == total-1 {
-		end = n
-	}
+	if shard == total-1 { end = n }
 	var seeds []string
-	for _, ch := range chars[start:end] {
-		seeds = append(seeds, string(ch))
-	}
+	for _, ch := range chars[start:end] { seeds = append(seeds, string(ch)) }
 	return seeds
 }
