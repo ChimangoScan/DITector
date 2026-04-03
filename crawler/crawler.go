@@ -34,7 +34,7 @@ func parseRepoName(repoName string) (namespace, name string) {
 const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-_"
 
 type ScrapeTask struct {
-	URL    string
+	URL string
 }
 
 type ParallelCrawler struct {
@@ -106,11 +106,13 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 	writerDone := make(chan struct{})
 	go pc.repoWriter(context.Background(), writerDone)
 
+	// Phase 1: Start Discovery Workers
 	for i := 0; i < 2; i++ {
 		pc.WG.Add(1)
 		go pc.discoveryWorker()
 	}
 
+	// Phase 2: Start Scrape Workers
 	for i := 0; i < pc.WorkerCount; i++ {
 		pc.WG.Add(1)
 		go pc.scrapeWorker(i)
@@ -199,7 +201,6 @@ func (pc *ParallelCrawler) discover(keyword string, client *http.Client, token s
 	var res V2SearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return client, token }
 
-	// SCRAPE FIRST: Always scrape available results to ensure immediate database growth
 	if res.Count > 0 {
 		pages := (res.Count / 100) + 1
 		if pages > 100 { pages = 100 }
@@ -209,7 +210,6 @@ func (pc *ParallelCrawler) discover(keyword string, client *http.Client, token s
 		}
 	}
 
-	// THEN DEEPEN: If it hits the 10k limit, also fan out
 	if (res.Count >= 10000 || len(keyword) == 1) && len(keyword) < 255 {
 		for _, char := range alphabet {
 			atomic.AddInt32(&pc.pending, 1)
