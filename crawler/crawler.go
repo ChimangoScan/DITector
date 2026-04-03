@@ -169,9 +169,25 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 
 	// Liveness Monitor: closes KeywordChan only when all tasks are complete
 	go func() {
-		for atomic.LoadInt32(&pc.pending) > 0 {
+		emptyCount := 0
+		for {
+			p := atomic.LoadInt32(&pc.pending)
+			if p == 0 {
+				emptyCount++
+			} else {
+				emptyCount = 0
+				if p > 100 {
+					myutils.Logger.Info(fmt.Sprintf("Discovery Progress: %d tasks pending...", p))
+				}
+			}
+
+			// Require 3 consecutive checks (~3s) of 0 pending to terminate
+			if emptyCount >= 6 {
+				break
+			}
 			time.Sleep(500 * time.Millisecond)
 		}
+		myutils.Logger.Info("All keywords processed. Shutting down pipeline...")
 		close(pc.KeywordChan)
 	}()
 
