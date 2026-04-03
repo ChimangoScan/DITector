@@ -275,70 +275,18 @@ SEED=a docker compose up -d crawler   # Máquina 1: a-m
 SEED=n docker compose up -d crawler   # Máquina 2: n-z
 ```
 
-### 4.9 Novos scripts de automação (`automation/`)
+### 4.9 Modificação em `scripts/calculate_node_dependent_weights.go`
+
+O branch `if repoDoc.Namespace == "library"` continha `continue` como primeira instrução, tornando todo o código abaixo inalcançável. Imagens oficiais Docker (`library/`) eram silenciosamente ignoradas no cálculo de dependency weight. O `continue` foi removido.
+
+### 4.10 Novos scripts de automação (`automation/`)
 
 - `pipeline_autopilot.sh` — executa os 3 estágios sequencialmente com configuração parametrizada
 - `test_e2e.sh` — teste de integração end-to-end: crawl com seed `nginx`, build, rank, verifica output
 
 ---
 
-## 5. Bugs corrigidos neste fork
-
-Lista completa de bugs encontrados e corrigidos (em ordem de severidade):
-
-### Bug 1 — `myutils/neo4j.go`: Cypher query com property errada (CRÍTICO)
-
-**Localização:** `FindSrcImgNamesByDigest` → `findLayerNodesByRawLayerDigestFunc`
-
-**Problema:** A query usava `{id: $digest}` para matchar um nó `RawLayer`, mas os nós `RawLayer` são criados com a propriedade `digest`, não `id`. A query nunca retornaria resultados, quebrando silenciosamente toda a funcionalidade de rastreamento de imagens upstream.
-
-```cypher
--- ANTES (errado):
-MATCH (l:Layer)-[:IS_SAME_AS]-(rl:RawLayer {id: $digest})
-
--- DEPOIS (correto):
-MATCH (l:Layer)-[:IS_SAME_AS]-(rl:RawLayer {digest: $digest})
-```
-
-### Bug 2 — `automation/test_e2e.sh`: Syntax error no shell (CRÍTICO)
-
-**Problema:** `[ [` é inválido em bash e faz o script de teste sempre falhar.
-
-```bash
-# ANTES (erro de sintaxe):
-if [ -f "test_output.json" ] && [ [ $(stat -c%s test_output.json) -gt 10 ]; then
-
-# DEPOIS (correto):
-if [ -f "test_output.json" ] && [ "$(stat -c%s test_output.json)" -gt 10 ]; then
-```
-
-### Bug 3 — `crawler/auth_proxy.go`: Proxy loading era stub (ALTO)
-
-**Problema:** A função `LoadIdentities` lia o arquivo de proxies mas nunca o parseava. O campo `im.Proxies` permanecia sempre vazio. Nenhum proxy era usado, tornando toda a funcionalidade de rotação de IP inoperante.
-
-**Correção:** Parse linha a linha com `strings.Split`, trim de espaços em branco, ignorando linhas vazias.
-
-### Bug 4 — `buildgraph/from_mongo.go`: Threshold hardcoded ignora parâmetro (MÉDIO)
-
-**Problema:** O parâmetro `pullCountThreshold` era corretamente usado no filtro MongoDB (`$gte: threshold`), mas dentro de `repoWorker` havia um segundo check hardcoded `repo.PullCount > 10000` que ignorava o threshold configurado via CLI. Isso criava comportamento inconsistente.
-
-**Correção:** Removido o check secundário — a filtragem é responsabilidade exclusiva da query MongoDB.
-
-### Bug 5 — `scripts/calculate_node_dependent_weights.go`: Dead code na branch `library` (MÉDIO)
-
-**Problema:** O branch `if repoDoc.Namespace == "library"` tinha `continue` como primeira instrução, tornando todo o código abaixo (`FindAllTagsByRepoName`, etc.) inalcançável. Imagens `library` (imagens oficiais Docker) eram simplesmente ignoradas no cálculo de pesos.
-
-**Correção:** Removido o `continue` prematuro. Imagens `library` agora fazem fetch de todos os tags (comportamento correto conforme o paper).
-
-### Bug 6 — `crawler/crawler.go`: Requisição com 429 descartada permanentemente (BAIXO)
-
-**Problema:** Quando uma página recebia status HTTP 429, `fetchPage` simplesmente retornava `nil` sem qualquer retry, causando perda silenciosa dos resultados daquela página.
-
-**Correção:** Ao receber 429, `fetchPage` agora: (1) dorme 10s, (2) rotaciona para uma nova identidade via `GetNextClient()`, (3) faz retry recursivo da mesma página com a nova identidade. A página nunca é perdida enquanto houver identidades disponíveis.
-
----
-
-## 6. Pré-requisitos e Configuração
+## 5. Pré-requisitos e Configuração
 
 ### Software necessário
 
