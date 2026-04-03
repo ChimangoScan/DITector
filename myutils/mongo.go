@@ -39,10 +39,13 @@ func NewMongo(uri, database, repositories, tags, images, imgResults, layerResult
 	var err error
 
 	// 设置超时时间
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	mongoOptions := options.Client().ApplyURI(uri)
+	mongoOptions := options.Client().ApplyURI(uri).
+		SetMaxPoolSize(100).
+		SetMinPoolSize(5).
+		SetMaxConnIdleTime(5 * time.Minute)
 	mymongo.Client, err = mongo.Connect(ctx, mongoOptions)
 	if err != nil {
 		return mymongo, err
