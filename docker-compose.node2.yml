@@ -1,30 +1,9 @@
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:latest
-    container_name: ditector_mongo
-    profiles: [db]
-    ports:
-      - "27017:27017"
-    volumes:
-      - ./mongo_data_secure:/data/db
-
-  neo4j:
-    image: neo4j:latest
-    container_name: ditector_neo4j
-    profiles: [db]
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      - NEO4J_AUTH=none
-    volumes:
-      - neo4j_data:/data
-
-  crawler:
+  crawler_node2:
     image: golang:1.22
-    container_name: ditector_crawler
+    container_name: ditector_crawler_node2
     restart: unless-stopped
     volumes:
       - .:/app
@@ -35,6 +14,3 @@ services:
       - NEO4J_URI=${NEO4J_URI}
       - PAGE_CONCURRENCY=${PAGE_CONCURRENCY:-0}
     command: sh -c "go build -buildvcs=false -o /tmp/ditector . && /tmp/ditector crawl --workers ${WORKERS:-3} --shard ${SHARD:-0} --shards ${SHARDS:-1} --accounts ${ACCOUNTS:-accounts.json} --config config.yaml"
-
-volumes:
-  neo4j_data:
