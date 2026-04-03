@@ -46,27 +46,58 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 	}
 }
 
-// Start initiates the parallel crawl
-func (pc *ParallelCrawler) Start(seed string) {
+// ShardSeeds divides the alphabet into `total` equal parts and returns the
+// seed characters assigned to shard index `shard` (0-based).
+//
+// Example with total=2:
+//   shard 0 → "abcdefghijklmnopqrs"   (first 19 of 38)
+//   shard 1 → "tuvwxyz0123456789-_"   (last 19 of 38)
+//
+// This is the meet-in-the-middle partitioning: each machine independently
+// explores a disjoint half of the DFS keyword tree. No coordination is needed
+// because root seeds never overlap — the only shared resource is MongoDB
+// (which uses upsert, so concurrent writes are safe).
+func ShardSeeds(shard, total int) []string {
+	chars := []rune(alphabet)
+	n := len(chars)
+	size := n / total
+	start := shard * size
+	end := start + size
+	if shard == total-1 {
+		end = n // last shard takes any remainder
+	}
+	seeds := make([]string, end-start)
+	for i, ch := range chars[start:end] {
+		seeds[i] = string(ch)
+	}
+	return seeds
+}
+
+// Start initiates the parallel crawl.
+//
+// seeds specifies the root keywords to enqueue. Rules:
+//   - len(seeds) > 0 → use exactly those seeds (supports --seed and --shard)
+//   - len(seeds) == 0 → seed the full alphabet (backward-compatible default)
+func (pc *ParallelCrawler) Start(seeds []string) {
 	myutils.Logger.Info(fmt.Sprintf("Starting Parallel Crawler with %d workers", pc.WorkerCount))
 
-	// Launch workers
 	for i := 0; i < pc.WorkerCount; i++ {
 		pc.WG.Add(1)
 		go pc.worker()
 	}
 
-	// Initial seed keywords
-	if seed != "" {
-		myutils.Logger.Info(fmt.Sprintf("Seeding crawler with: %s", seed))
-		pc.KeywordChan <- seed
+	if len(seeds) > 0 {
+		myutils.Logger.Info(fmt.Sprintf("Seeding crawler with %d root keywords: %v", len(seeds), seeds))
+		for _, s := range seeds {
+			pc.KeywordChan <- s
+		}
 	} else {
-		for _, char := range alphabet {
-			pc.KeywordChan <- string(char)
+		myutils.Logger.Info("Seeding crawler with full alphabet (38 root keywords)")
+		for _, ch := range alphabet {
+			pc.KeywordChan <- string(ch)
 		}
 	}
 
-	// Wait for workers to finish
 	pc.WG.Wait()
 }
 
