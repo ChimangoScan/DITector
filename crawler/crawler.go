@@ -182,7 +182,7 @@ func (pc *ParallelCrawler) getNextTask() string {
 }
 
 func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token string) (*http.Client, string) {
-	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token)
+	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token, 0)
 	client, token = nextClient, nextToken
 	if res == nil {
 		pc.updateTaskStatus(prefix, "pending")
@@ -201,7 +201,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 			jitter := 400 + rand.Intn(500)
 			time.Sleep(time.Duration(jitter) * time.Millisecond)
 			
-			resP, c, t := pc.fetchPage(prefix, p, client, token)
+			resP, c, t := pc.fetchPage(prefix, p, client, token, 0)
 			client, token = c, t
 			if resP != nil { pc.processResults(resP.Repositories) }
 		}
@@ -240,14 +240,14 @@ func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client
 		wg.Add(1); sem <- struct{}{}
 		go func(page int) {
 			defer wg.Done(); defer func() { <-sem }()
-			res, _, _ := pc.fetchPage(keyword, page, client, token)
+			res, _, _ := pc.fetchPage(keyword, page, client, token, 0)
 			if res != nil { pc.processResults(res.Repositories) }
 		}(p)
 	}
 	wg.Wait()
 }
 
-func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string) (*V2SearchResponse, *http.Client, string) {
+func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string, backoff time.Duration) (*V2SearchResponse, *http.Client, string) {
 	url := myutils.GetV2SearchURL(query, page, 100)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -258,11 +258,25 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		myutils.Logger.Warn("429. Rotating...")
-		time.Sleep(10 * time.Second)
+		// Exponential Backoff logic
+		if backoff == 0 {
+			backoff = 10 * time.Second
+		} else {
+			backoff *= 2
+		}
+		
+		// Cap backoff at 15 minutes to avoid hanging forever
+		if backoff > 15 * time.Minute {
+			backoff = 15 * time.Minute
+		}
+
+		myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q page %d. Sleeping %v before retry...", query, page, backoff))
+		time.Sleep(backoff)
+		
 		newC, newT := pc.IM.GetNextClient()
-		return pc.fetchPage(query, page, newC, newT)
+		return pc.fetchPage(query, page, newC, newT, backoff)
 	}
+
 	if resp.StatusCode != http.StatusOK { return nil, client, token }
 	var res V2SearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return nil, client, token }
