@@ -229,12 +229,20 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 
 	if resp.StatusCode == 429 {
 		myutils.Logger.Warn("Rate limited. Rotating identity and sleeping 10s...")
-		time.Sleep(10 * time.Second) // Backoff menor que o Python (60s) pois temos rotação
+		time.Sleep(10 * time.Second)
+		newClient, newToken := pc.IM.GetNextClient()
+		return pc.fetchPage(query, page, newClient, newToken)
+	}
+
+	if resp.StatusCode == 401 {
+		myutils.Logger.Warn(fmt.Sprintf("JWT expired or revoked for query %q page %d. Re-authenticating...", query, page))
+		pc.IM.ClearToken(token)
 		newClient, newToken := pc.IM.GetNextClient()
 		return pc.fetchPage(query, page, newClient, newToken)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		myutils.Logger.Error(fmt.Sprintf("Unexpected status %d for query %q page %d", resp.StatusCode, query, page))
 		return nil, client, token
 	}
 

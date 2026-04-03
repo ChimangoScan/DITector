@@ -112,6 +112,23 @@ func (im *IdentityManager) LoginDockerHub(acc *Account) error {
 	return nil
 }
 
+// ClearToken finds the account that holds the given token and clears it so that
+// the next GetNextClient call for that account triggers a fresh login. This is
+// the correct response to an HTTP 401 (token expired or revoked).
+func (im *IdentityManager) ClearToken(token string) {
+	if token == "" {
+		return
+	}
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	for _, acc := range im.Accounts {
+		if acc.Token == token {
+			acc.Token = ""
+			return
+		}
+	}
+}
+
 // GetNextClient returns an http.Client and a valid Token (logins if necessary)
 func (im *IdentityManager) GetNextClient() (*http.Client, string) {
 	im.mu.Lock()

@@ -1,14 +1,15 @@
 package buildgraph
 
 import (
+	"context"
 	"fmt"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
 	"go.mongodb.org/mongo-driver/bson"
+	mongodb_opts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type GraphJob struct {
@@ -77,8 +78,7 @@ func StartFromMongo(page int64, pageSize int64, tagCnt int, pullCountThreshold i
 	fmt.Printf("Build finalizado. Tempo total: %v\n", time.Since(beginTime))
 }
 
-func loadReposToChannel(page int64, pageSize int64, threshold int64, ch chan *myutils.Repository) {
-	repoPage := page
+func loadReposToChannel(_ int64, _ int64, threshold int64, ch chan *myutils.Repository) {
 	for {
 		// Resume: only load repos that have NOT been fully processed by a
 		// previous run. graph_built_at is set by repoWorker after all tags
@@ -106,38 +106,12 @@ func loadReposToChannel(page int64, pageSize int64, threshold int64, ch chan *my
 	}
 }
 
-// networkKeywords are used as a heuristic to identify containers that
-// likely expose network services and are therefore candidates for OpenVAS scanning.
-var networkKeywords = []string{
-	"nginx", "apache", "http", "https", "server", "web", "api", "rest",
-	"grpc", "db", "database", "mysql", "postgres", "sql", "redis", "mongo",
-	"elastic", "kafka", "rabbitmq", "proxy", "gateway", "lb", "balancer",
-	"vpn", "ssh", "ftp", "smtp", "imap", "ldap", "app", "service", "svc",
-}
-
-func isNetworkContainer(name string) bool {
-	lower := strings.ToLower(name)
-	for _, kw := range networkKeywords {
-		if strings.Contains(lower, kw) {
-			return true
-		}
-	}
-	return false
-}
-
 // tagConcurrency limits concurrent image-manifest fetches per repo to avoid
 // triggering per-repo rate limits on Docker Hub.
 const tagConcurrency = 4
 
 func repoWorker(repoChan chan *myutils.Repository, jobChan chan GraphJob, tagCnt int) {
 	for repo := range repoChan {
-		// Only submit to the graph if the repo passes the network heuristic.
-		// The pull_count threshold is already enforced at the MongoDB query level
-		// in loadReposToChannel, so no secondary check is needed here.
-		if !isNetworkContainer(repo.Name) {
-			continue
-		}
-
 		tags, err := myutils.ReqTagsMetadata(repo.Namespace, repo.Name, 1, tagCnt)
 		if err != nil {
 			continue

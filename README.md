@@ -10,17 +10,16 @@
 2. [Arquitetura da Pipeline](#2-arquitetura-da-pipeline)
 3. [Metodologia Científica (paper Dr. Docker)](#3-metodologia-científica)
 4. [O que este fork modifica](#4-o-que-este-fork-modifica)
-5. [Bugs corrigidos neste fork](#5-bugs-corrigidos-neste-fork)
-6. [Pré-requisitos e Configuração](#6-pré-requisitos-e-configuração)
-7. [Configuração do `config.yaml`](#7-configuração-do-configyaml)
-8. [Estágio I — Crawling (Descoberta)](#8-estágio-i--crawling-descoberta)
-9. [Estágio II — Build (Grafo IDEA)](#9-estágio-ii--build-grafo-idea)
-10. [Estágio III — Rank (Priorização)](#10-estágio-iii--rank-priorização)
-11. [Integração com OpenVAS](#11-integração-com-openvas)
-12. [Automação da Pipeline](#12-automação-da-pipeline)
-13. [Monitoramento](#13-monitoramento)
-14. [Referência de Comandos](#14-referência-de-comandos)
-15. [Decisões de Design e Trade-offs](#15-decisões-de-design-e-trade-offs)
+5. [Pré-requisitos e Configuração](#5-pré-requisitos-e-configuração)
+6. [Configuração do `config.yaml`](#6-configuração-do-configyaml)
+7. [Estágio I — Crawling (Descoberta)](#7-estágio-i--crawling-descoberta)
+8. [Estágio II — Build (Grafo IDEA)](#8-estágio-ii--build-grafo-idea)
+9. [Estágio III — Rank (Priorização)](#9-estágio-iii--rank-priorização)
+10. [Integração com OpenVAS](#10-integração-com-openvas)
+11. [Automação da Pipeline](#11-automação-da-pipeline)
+12. [Monitoramento](#12-monitoramento)
+13. [Referência de Comandos](#13-referência-de-comandos)
+14. [Decisões de Design e Trade-offs](#14-decisões-de-design-e-trade-offs)
 
 ---
 
@@ -242,7 +241,9 @@ Adicionadas ao cliente MongoDB para suportar o crawler de alta vazão:
 1. Todos os IDs de layer são computados localmente via SHA256 (puro CPU, zero I/O de rede)
 2. Toda a cadeia de layers + tag de imagem é inserida em **uma única `ExecuteWrite`** — O(1) round-trips por imagem independente do número de layers
 
-Resultado: latência de inserção cai de O(N layers × RTT) para O(1 × RTT) ≈ 100-200× mais rápido para imagens com 20+ layers.
+Resultado: latência de inserção cai de O(N layers × RTT) para O(1 × RTT).
+
+**Correção em `findLayerNodesByRawLayerDigestFunc`:** a query original usava `{id: $digest}` para matchar um nó `RawLayer`, mas a propriedade armazenada é `digest`. Corrigido para `{digest: $digest}`. O bug quebrava silenciosamente o rastreamento de imagens upstream.
 
 ### 4.6 Modificações em `myutils/docker_hub_api_requests.go`
 
