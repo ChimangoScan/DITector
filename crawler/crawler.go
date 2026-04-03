@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
@@ -29,7 +30,6 @@ var pageConcurrency = func() int {
 }()
 
 // parseRepoName splits "namespace/name" from the V2 API repo_name field.
-// Official images (e.g. "nginx") are treated as "library/nginx".
 func parseRepoName(repoName string) (namespace, name string) {
 	parts := strings.SplitN(repoName, "/", 2)
 	if len(parts) == 2 {
@@ -48,7 +48,8 @@ type ParallelCrawler struct {
 	RepoChan    chan *myutils.Repository
 	WG          sync.WaitGroup
 	IM          *IdentityManager
-	crawledKeys sync.Map // cache for already crawled keywords
+	crawledKeys sync.Map
+	pending     int32 // Atomic counter for active/queued keywords
 }
 
 // NewParallelCrawler initializes a new crawler
@@ -135,7 +136,7 @@ func ShardSeeds(shard, total int) []string {
 	start := shard * size
 	end := start + size
 	if shard == total-1 {
-		end = n // last shard takes any remainder
+		end = n
 	}
 	seeds := make([]string, end-start)
 	for i, ch := range chars[start:end] {
@@ -146,9 +147,8 @@ func ShardSeeds(shard, total int) []string {
 
 // Start initiates the parallel crawl.
 func (pc *ParallelCrawler) Start(seeds []string) {
-	myutils.Logger.Info(fmt.Sprintf("Starting Parallel Crawler with %d workers", pc.WorkerCount))
+	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [%d workers]", pc.WorkerCount))
 
-	// Start background writer
 	go pc.repoWriter()
 
 	for i := 0; i < pc.WorkerCount; i++ {
@@ -156,20 +156,28 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 		go pc.worker(i)
 	}
 
-	if len(seeds) > 0 {
-		myutils.Logger.Info(fmt.Sprintf("Seeding crawler with %d root keywords: %v", len(seeds), seeds))
-		for _, s := range seeds {
-			pc.KeywordChan <- s
-		}
-	} else {
-		myutils.Logger.Info("Seeding crawler with full alphabet (38 root keywords)")
+	if len(seeds) == 0 {
 		for _, ch := range alphabet {
-			pc.KeywordChan <- string(ch)
+			seeds = append(seeds, string(ch))
 		}
 	}
 
+	for _, s := range seeds {
+		atomic.AddInt32(&pc.pending, 1)
+		pc.KeywordChan <- s
+	}
+
+	// Liveness Monitor: closes KeywordChan only when all tasks are complete
+	go func() {
+		for atomic.LoadInt32(&pc.pending) > 0 {
+			time.Sleep(500 * time.Millisecond)
+		}
+		close(pc.KeywordChan)
+	}()
+
 	pc.WG.Wait()
 	close(pc.RepoChan)
+	myutils.Logger.Info("Discovery Phase Complete")
 }
 
 // worker pulls keywords from the channel and processes them.
@@ -179,29 +187,29 @@ func (pc *ParallelCrawler) worker(workerID int) {
 	var client *http.Client
 	var token string
 
-	// Strict Account Isolation: if workers == accounts, lock each worker to one account
+	// Strict Account Isolation
 	if pc.WorkerCount == len(pc.IM.Accounts) {
 		acc := pc.IM.Accounts[workerID]
 		if acc.Token == "" {
 			pc.IM.LoginDockerHub(acc)
 		}
 		token = acc.Token
-		// Dedicated transport for this worker to avoid connection pooling issues between accounts
 		client = &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				MaxConnsPerHost:     10,
-				IdleConnTimeout:     90 * time.Second,
+				MaxIdleConns:    10,
+				MaxConnsPerHost: 10,
+				IdleConnTimeout: 90 * time.Second,
 			},
 		}
-		myutils.Logger.Info(fmt.Sprintf("Worker %d strictly isolated to account: %s", workerID, acc.Username))
+		myutils.Logger.Info(fmt.Sprintf("Worker %d isolated to account: %s", workerID, acc.Username))
 	} else {
 		client, token = pc.IM.GetNextClient()
 	}
 
 	for keyword := range pc.KeywordChan {
 		client, token = pc.crawlKeyword(keyword, client, token)
+		atomic.AddInt32(&pc.pending, -1)
 	}
 }
 
@@ -217,11 +225,9 @@ type V2SearchResponse struct {
 }
 
 // crawlKeyword processes one keyword and returns the (possibly rotated)
-// identity to use for the next keyword. On 429 the keyword is re-enqueued
-// and a fresh identity is returned immediately — no sleep.
+// identity to use for the next keyword.
 func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) (*http.Client, string) {
 	if _, crawled := pc.crawledKeys.Load(keyword); crawled {
-		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] already crawled (cache), skipping", keyword))
 		return client, token
 	}
 
@@ -234,56 +240,51 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 
 	resp, err := client.Do(req)
 	if err != nil {
-		myutils.Logger.Error(fmt.Sprintf("Request failed for keyword [%s]: %v", keyword, err))
+		myutils.Logger.Error(fmt.Sprintf("Keyword [%s] network error: %v", keyword, err))
 		return client, token
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] got 429. Rotating identity...", keyword))
+		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] 429. Re-enqueuing...", keyword))
+		atomic.AddInt32(&pc.pending, 1)
 		pc.KeywordChan <- keyword
 		return pc.IM.GetNextClient()
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] got status %d", keyword, resp.StatusCode))
 		return client, token
 	}
 
 	var searchRes V2SearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
-		myutils.Logger.Error(fmt.Sprintf("JSON decode failed for keyword [%s]: %v", keyword, err))
 		return client, token
 	}
 
-	// Deepen Directly strategy: skip scraping parent nodes with 10k results
+	// Deepen Directly strategy
 	if searchRes.Count >= 10000 && len(keyword) < 255 {
-		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has >= 10000 results (%d). Deepening DFS directly...", keyword, searchRes.Count))
+		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] hits limit (%d). Fanning out...", keyword, searchRes.Count))
 		for _, char := range alphabet {
+			atomic.AddInt32(&pc.pending, 1)
 			pc.KeywordChan <- keyword + string(char)
 		}
+		pc.markKeywordDone(keyword)
 		return client, token
 	}
 
 	if searchRes.Count > 0 {
-		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d repositories. Scraping all pages...", keyword, searchRes.Count))
+		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] found %d. Scraping...", keyword, searchRes.Count))
 		pc.scrapeAllPages(keyword, searchRes.Count, client, token)
-		pc.crawledKeys.Store(keyword, true)
-		if myutils.GlobalDBClient.MongoFlag {
-			go func(k string) {
-				if err := myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(k); err != nil {
-					myutils.Logger.Error(fmt.Sprintf("MarkKeywordCrawled [%s] failed: %v", k, err))
-				}
-			}(keyword)
-		}
-	} else {
-		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] returned 0 results.", keyword))
-		pc.crawledKeys.Store(keyword, true)
-		if myutils.GlobalDBClient.MongoFlag {
-			go myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
-		}
 	}
+	pc.markKeywordDone(keyword)
 	return client, token
+}
+
+func (pc *ParallelCrawler) markKeywordDone(keyword string) {
+	pc.crawledKeys.Store(keyword, true)
+	if myutils.GlobalDBClient.MongoFlag {
+		go myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
+	}
 }
 
 func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client *http.Client, token string) {
@@ -315,7 +316,6 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 
 	resp, err := client.Do(req)
 	if err != nil {
-		myutils.Logger.Error(fmt.Sprintf("Page request failed: %v", err))
 		return
 	}
 	defer resp.Body.Close()
