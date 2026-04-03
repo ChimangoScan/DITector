@@ -5,6 +5,8 @@ crawler/proxyaddr.json
 secret.json
 .secret
 config.yaml
+.env
+accounts_*.json
 
 test.json
 *.log
@@ -20,8 +22,6 @@ pkg/
 # ==========================
 *result.json
 ditector
-accounts.json
-accounts_gpu1.json
-accounts_a9.json
+accounts*.json
 docker-scan
 mongo_data_secure/

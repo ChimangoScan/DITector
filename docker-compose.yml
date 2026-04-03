@@ -4,6 +4,7 @@ services:
   mongodb:
     image: mongo:latest
     container_name: ditector_mongo
+    profiles: [db]
     ports:
       - "27017:27017"
     volumes:
@@ -12,6 +13,7 @@ services:
   neo4j:
     image: neo4j:latest
     container_name: ditector_neo4j
+    profiles: [db]
     ports:
       - "7474:7474"
       - "7687:7687"
@@ -24,19 +26,21 @@ services:
     image: golang:1.22
     container_name: ditector_crawler
     restart: unless-stopped
-    depends_on:
-      - mongodb
-      - neo4j
     volumes:
       - .:/app
     working_dir: /app
     network_mode: host
     environment:
-      - PAGE_CONCURRENCY=${PAGE_CONCURRENCY:-8}
-    # Meet-in-the-middle: shard 0/2 covers keywords starting with a–s (19 root chars).
-    # Machine node2 runs docker-compose.node2.yml with --shard 1 --shards 2 (t–_).
-    command: sh -c "go build -buildvcs=false -o /tmp/ditector . && /tmp/ditector crawl --workers ${WORKERS:-50} --shard 0 --shards 2 --accounts accounts_node1.json --config config.yaml"
+      - MONGO_URI=${MONGO_URI}
+      - NEO4J_URI=${NEO4J_URI}
+    command: >
+      sh -c "go build -buildvcs=false -o /tmp/ditector . &&
+             /tmp/ditector crawl
+               --workers ${WORKERS:-3}
+               --shard ${SHARD:-0}
+               --shards ${SHARDS:-1}
+               --accounts ${ACCOUNTS:-accounts.json}
+               --config config.yaml"
 
 volumes:
-  mongo_data:
   neo4j_data:
