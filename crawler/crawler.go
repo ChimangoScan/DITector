@@ -66,7 +66,14 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 	flush := func() {
 		if len(buffer) == 0 { return }
 		count := len(buffer)
-		_ = myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(buffer)
+		
+		// BulkUpsertRepositories inside myutils already has a 30s timeout context.
+		err := myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(buffer)
+		if err != nil {
+			myutils.Logger.Error(fmt.Sprintf("DB ERROR during flush: %v", err))
+			return
+		}
+		
 		myutils.Logger.Info(fmt.Sprintf(">>> DATABASE UPDATE: Flushed %d NEW unique repos", count))
 		buffer = buffer[:0]
 	}
@@ -117,8 +124,12 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 func (pc *ParallelCrawler) ensureQueueInitialized(seeds []string) {
 	if !myutils.GlobalDBClient.MongoFlag { return }
 	coll := myutils.GlobalDBClient.Mongo.KeywordsColl
-	_, _ = coll.UpdateMany(context.TODO(), bson.M{"status": "processing"}, bson.M{"$set": bson.M{"status": "pending"}})
-	count, _ := coll.CountDocuments(context.TODO(), bson.M{})
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	_, _ = coll.UpdateMany(ctx, bson.M{"status": "processing"}, bson.M{"$set": bson.M{"status": "pending"}})
+	count, _ := coll.CountDocuments(ctx, bson.M{})
 	if count > 0 { return }
 
 	var models []mongo.WriteModel
@@ -128,16 +139,15 @@ func (pc *ParallelCrawler) ensureQueueInitialized(seeds []string) {
 	_, _ = coll.BulkWrite(context.TODO(), models)
 }
 
-// getNewHTTPClient creates a fresh, non-persistent client to avoid "Tarpit" effects.
 func (pc *ParallelCrawler) getNewHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
-			DisableKeepAlives:     true, // Kill connection after each request
+			DisableKeepAlives:     true,
 			MaxIdleConns:          1,
 			IdleConnTimeout:       1 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 15 * time.Second,
-			TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper), // Force HTTP/1.1
+			TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 		},
 		Timeout: 30 * time.Second,
 	}
@@ -160,8 +170,12 @@ func (pc *ParallelCrawler) worker(id int) {
 func (pc *ParallelCrawler) getNextTask() string {
 	if !myutils.GlobalDBClient.MongoFlag { return "" }
 	var doc struct{ ID string `bson:"_id"` }
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	err := myutils.GlobalDBClient.Mongo.KeywordsColl.FindOneAndUpdate(
-		context.TODO(),
+		ctx,
 		bson.M{"status": "pending"},
 		bson.M{"$set": bson.M{"status": "processing", "started_at": time.Now()}},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
@@ -173,22 +187,22 @@ func (pc *ParallelCrawler) getNextTask() string {
 func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token string) (*http.Client, string) {
 	myutils.Logger.Info(fmt.Sprintf("Processing Prefix: [%s]", prefix))
 	
-	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token, 0)
+	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token)
 	client, token = nextClient, nextToken
 	if res == nil {
 		pc.updateTaskStatus(prefix, "pending")
 		return client, token
 	}
 
-	newInPrefix := pc.processResults(res.Repositories)
+	pc.processResults(res.Repositories)
 	pages := (res.Count / 100) + 1
 	if pages > 100 { pages = 100 }
 	for p := 2; p <= pages; p++ {
 		time.Sleep(time.Duration(400 + rand.Intn(500)) * time.Millisecond)
-		resP, c, t := pc.fetchPage(prefix, p, client, token, 0)
+		resP, c, t := pc.fetchPage(prefix, p, client, token)
 		client, token = c, t
 		if resP != nil { 
-			newInPrefix += pc.processResults(resP.Repositories)
+			pc.processResults(resP.Repositories)
 		}
 	}
 
@@ -197,62 +211,70 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		for _, char := range alphabet {
 			models = append(models, mongo.NewUpdateOneModel().SetFilter(bson.M{"_id": prefix + string(char)}).SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).SetUpsert(true))
 		}
-		_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.BulkWrite(context.TODO(), models)
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.BulkWrite(ctx, models)
 	}
 	
-	myutils.Logger.Info(fmt.Sprintf("Finished Prefix [%s]: Added %d NEW repos", prefix, newInPrefix))
 	pc.updateTaskStatus(prefix, "done")
 	return client, token
 }
 
 func (pc *ParallelCrawler) updateTaskStatus(id, status string) {
-	_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.UpdateOne(context.TODO(), bson.M{"_id": id}, bson.M{"$set": bson.M{"status": status, "finished_at": time.Now()}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": status, "finished_at": time.Now()}})
 }
 
-func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string, backoff time.Duration) (*V2SearchResponse, *http.Client, string) {
-	url := myutils.GetV2SearchURL(query, page, 100)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	if token != "" { req.Header.Add("Authorization", "JWT "+token) }
+func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string) (*V2SearchResponse, *http.Client, string) {
+	for attempts := 0; attempts < 3; attempts++ {
+		url := myutils.GetV2SearchURL(query, page, 100)
+		req, _ := http.NewRequest("GET", url, nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		if token != "" { req.Header.Add("Authorization", "JWT "+token) }
 
-	resp, err := client.Do(req)
-	if err != nil {
-		myutils.Logger.Error(fmt.Sprintf("Network Error for %q: %v. Refreshing connection...", query, err))
-		return nil, pc.getNewHTTPClient(), token
+		resp, err := client.Do(req)
+		if err != nil {
+			myutils.Logger.Error(fmt.Sprintf("Network Error for %q: %v. Refreshing connection...", query, err))
+			client = pc.getNewHTTPClient()
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == 429 {
+			myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q. Rotating account...", query))
+			time.Sleep(10 * time.Second)
+			_, token = pc.IM.GetNextClient()
+			client = pc.getNewHTTPClient()
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK { return nil, client, token }
+		var res V2SearchResponse
+		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return nil, client, token }
+		return &res, client, token
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 429 {
-		if backoff == 0 { backoff = 10 * time.Second } else { backoff *= 2 }
-		if backoff > 15 * time.Minute { backoff = 15 * time.Minute }
-		
-		myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q. Backoff: %v. Rotating account...", query, backoff))
-		time.Sleep(backoff)
-		
-		newC, newT := pc.IM.GetNextClient()
-		// Recursively retry with a FRESH client and increased backoff
-		return pc.fetchPage(query, page, pc.getNewHTTPClient(), newT, backoff)
-	}
-
-	if resp.StatusCode != http.StatusOK { return nil, client, token }
-	var res V2SearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return nil, client, token }
-	return &res, client, token
+	return nil, client, token
 }
 
 func (pc *ParallelCrawler) processResults(repos []struct {
 	RepoName  string "json:\"repo_name\""
 	PullCount int64  "json:\"pull_count\""
-}) int {
-	newCount := 0
+}) {
 	for _, r := range repos {
 		if r.RepoName == "" { continue }
 		if _, seen := pc.seenRepos.LoadOrStore(r.RepoName, true); seen { continue }
+		
 		ns, name := parseRepoName(r.RepoName)
-		pc.RepoChan <- &myutils.Repository{Namespace: ns, Name: name, PullCount: r.PullCount}
-		newCount++
+		
+		select {
+		case pc.RepoChan <- &myutils.Repository{Namespace: ns, Name: name, PullCount: r.PullCount}:
+		default:
+			myutils.Logger.Warn("RepoChan FULL! Data may be delayed.")
+		}
 	}
-	return newCount
 }
 
 type V2SearchResponse struct {
