@@ -205,8 +205,6 @@ MongoDB (repositories)
            Neo4j + MongoDB (MarkRepoGraphBuilt → graph_built_at)
 ```
 
-**Filtro heurístico de rede:** `repoWorker` aplica `isNetworkContainer(repo.Name)` — lista de 30+ keywords como `nginx`, `postgres`, `redis`, `proxy`, `gateway`, etc. — para descartar containers que provavelmente não expõem serviços de rede antes mesmo de chamar a API.
-
 **Checkpointing Stage II:** após inserir todas as tags de um repositório no Neo4j, `repoWorker` chama `MarkRepoGraphBuilt`, que grava `graph_built_at` no documento MongoDB. O loader ignora repositórios com esse campo em reinícios subsequentes — zero retrabalho.
 
 ### 4.3 Modificação em `myutils/urls.go`
@@ -508,13 +506,10 @@ Com 1 máquina e 20 workers rodando por 24h, espera-se descobrir entre 500.000 e
 
 Para cada repositório no MongoDB com `pull_count >= threshold`:
 
-1. Aplica **filtro heurístico de rede** — descarta repositórios cujo nome não contém keywords de serviços de rede (nginx, postgres, redis, api, etc.)
-2. Chama a API Docker Hub para buscar as N tags mais recentes do repositório
-3. Para cada tag, busca os metadados de imagem (layers: digest, instruction, size)
-4. Filtra imagens Windows
-5. Insere no **Neo4j** o grafo IDEA com o algoritmo de hashing das seções 3.2
-
-**Por que o filtro de rede aqui:** Containers sem serviços de rede não são candidatos ao scan OpenVAS. Filtrá-los no estágio II evita construir um grafo desnecessariamente grande e reduz drasticamente o tempo do estágio III.
+1. Chama a API Docker Hub para buscar as N tags mais recentes do repositório
+2. Para cada tag, busca os metadados de imagem (layers: digest, instruction, size)
+3. Filtra imagens Windows
+4. Insere no **Neo4j** o grafo IDEA com o algoritmo de hashing das seções 3.2
 
 ### Como executar
 
@@ -617,16 +612,7 @@ images_for_openvas.txt
   7. próxima imagem
 ```
 
-**Por que containers que não são de rede falham:** Se o container não expõe portas ou não roda um daemon de rede, o OpenVAS simplesmente não encontrará serviços. Seu script externo já trata isso: tenta o setup e, em caso de falha, avança para o próximo. O filtro heurístico desta pipeline reduz drasticamente o número de tentativas falhas.
-
-**Heurística de rede atual** (keywords no nome do repositório):
-```
-nginx, apache, http, https, server, web, api, rest, grpc, db, database,
-mysql, postgres, sql, redis, mongo, elastic, kafka, rabbitmq, proxy,
-gateway, lb, balancer, vpn, ssh, ftp, smtp, imap, ldap, app, service, svc
-```
-
-> Esta lista é conservadora por design. Containers que passam na heurística têm alta probabilidade de expor algum serviço de rede. Containers sem keywords no nome ainda podem ser candidatos — seu script de scanning trata esses casos com a lógica de fallback.
+**Containers sem serviços de rede:** se o container não expõe portas ou não roda um daemon de rede, o OpenVAS não encontrará serviços. O script externo de scanning deve tratar esse caso avançando para o próximo container.
 
 ---
 
