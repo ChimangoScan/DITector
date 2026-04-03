@@ -174,8 +174,8 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 		return client, token
 	}
 
-	if searchRes.Count >= 10000 && len(keyword) < 5 {
-		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has %d results. Deepening DFS...", keyword, searchRes.Count))
+	if searchRes.Count >= 10000 && len(keyword) < 255 {
+		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has >= 10000 results. Deepening DFS to ensure full coverage...", keyword))
 		for _, char := range alphabet {
 			pc.KeywordChan <- keyword + string(char)
 		}
