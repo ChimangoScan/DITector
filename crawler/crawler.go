@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"crypto/tls"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
 	"go.mongodb.org/mongo-driver/bson"
@@ -28,7 +29,7 @@ var pageConcurrency = func() int {
 		fmt.Sscan(v, &n)
 		if n > 0 { return n }
 	}
-	return 0 // Default to serial (Python-mimic) if not specified
+	return 0
 }()
 
 func parseRepoName(repoName string) (namespace, name string) {
@@ -82,9 +83,9 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 }
 
 func (pc *ParallelCrawler) Start(seeds []string) {
-	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [W:%d, PC:%d]", pc.WorkerCount, pageConcurrency))
+	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [W:%d]", pc.WorkerCount))
 	
-	// Initialize task queue in MongoDB
+	// Initialize task queue
 	if len(seeds) == 0 {
 		for _, ch := range alphabet { seeds = append(seeds, string(ch)) }
 	}
@@ -98,7 +99,6 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 		go pc.worker(i)
 	}
 
-	// Liveness Monitor
 	go func() {
 		for {
 			p := atomic.LoadInt32(&pc.pending)
@@ -108,7 +108,7 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 				active, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.CountDocuments(context.TODO(), bson.M{"status": "pending"})
 				if active == 0 { break }
 			}
-			myutils.Logger.Info(fmt.Sprintf("Progress: %d local workers active | %d tasks in queue", p, active))
+			myutils.Logger.Info(fmt.Sprintf("Progress: %d local active | %d tasks queued", p, active))
 			time.Sleep(10 * time.Second)
 		}
 	}()
@@ -122,43 +122,38 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 func (pc *ParallelCrawler) ensureQueueInitialized(seeds []string) {
 	if !myutils.GlobalDBClient.MongoFlag { return }
 	coll := myutils.GlobalDBClient.Mongo.KeywordsColl
-
-	// Self-healing: reset stuck 'processing' tasks back to 'pending'
-	_, _ = coll.UpdateMany(context.TODO(), 
-		bson.M{"status": "processing"}, 
-		bson.M{"$set": bson.M{"status": "pending"}},
-	)
-
+	_, _ = coll.UpdateMany(context.TODO(), bson.M{"status": "processing"}, bson.M{"$set": bson.M{"status": "pending"}})
 	count, _ := coll.CountDocuments(context.TODO(), bson.M{})
 	if count > 0 { return }
 
-	myutils.Logger.Info("Initializing task queue with root seeds...")
 	var models []mongo.WriteModel
 	for _, s := range seeds {
-		models = append(models, mongo.NewUpdateOneModel().
-			SetFilter(bson.M{"_id": s}).
-			SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).
-			SetUpsert(true))
+		models = append(models, mongo.NewUpdateOneModel().SetFilter(bson.M{"_id": s}).SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).SetUpsert(true))
 	}
 	_, _ = coll.BulkWrite(context.TODO(), models)
 }
 
 func (pc *ParallelCrawler) worker(id int) {
 	defer pc.WG.Done()
-	client, token := pc.IM.GetNextClient()
 	
-	// Strict Account Isolation
-	if pc.WorkerCount == len(pc.IM.Accounts) {
-		acc := pc.IM.Accounts[id]
-		if acc.Token == "" { pc.IM.LoginDockerHub(acc) }
-		token = acc.Token
-		client = &http.Client{Timeout: 30 * time.Second}
+	// Optimized HTTP Client: Disabled HTTP/2 to prevent hang bugs with Cloudflare
+	tr := &http.Transport{
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper), // Forces HTTP/1.1
 	}
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   30 * time.Second,
+	}
+	_, token := pc.IM.GetNextClient()
 
 	for {
 		prefix := pc.getNextTask()
 		if prefix == "" { break }
-
 		atomic.AddInt32(&pc.pending, 1)
 		client, token = pc.processTask(prefix, client, token)
 		atomic.AddInt32(&pc.pending, -1)
@@ -167,16 +162,13 @@ func (pc *ParallelCrawler) worker(id int) {
 
 func (pc *ParallelCrawler) getNextTask() string {
 	if !myutils.GlobalDBClient.MongoFlag { return "" }
-	coll := myutils.GlobalDBClient.Mongo.KeywordsColl
 	var doc struct{ ID string `bson:"_id"` }
-	
-	err := coll.FindOneAndUpdate(
+	err := myutils.GlobalDBClient.Mongo.KeywordsColl.FindOneAndUpdate(
 		context.TODO(),
 		bson.M{"status": "pending"},
 		bson.M{"$set": bson.M{"status": "processing", "started_at": time.Now()}},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&doc)
-
 	if err != nil { return "" }
 	return doc.ID
 }
@@ -189,62 +181,29 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		return client, token
 	}
 
-	// Scrape
 	pc.processResults(res.Repositories)
-	if pageConcurrency > 0 {
-		pc.scrapeAllPages(prefix, res.Count, client, token)
-	} else {
-		// Serial fallback with Jitter (400ms to 900ms)
-		pages := (res.Count / 100) + 1
-		if pages > 100 { pages = 100 }
-		for p := 2; p <= pages; p++ {
-			jitter := 400 + rand.Intn(500)
-			time.Sleep(time.Duration(jitter) * time.Millisecond)
-			
-			resP, c, t := pc.fetchPage(prefix, p, client, token, 0)
-			client, token = c, t
-			if resP != nil { pc.processResults(resP.Repositories) }
-		}
+	pages := (res.Count / 100) + 1
+	if pages > 100 { pages = 100 }
+	for p := 2; p <= pages; p++ {
+		time.Sleep(time.Duration(400 + rand.Intn(500)) * time.Millisecond)
+		resP, c, t := pc.fetchPage(prefix, p, client, token, 0)
+		client, token = c, t
+		if resP != nil { pc.processResults(resP.Repositories) }
 	}
 
-	// Fan-out
 	if (res.Count >= 10000 || len(prefix) == 1) && len(prefix) < 255 {
 		var models []mongo.WriteModel
 		for _, char := range alphabet {
-			models = append(models, mongo.NewUpdateOneModel().
-				SetFilter(bson.M{"_id": prefix + string(char)}).
-				SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).
-				SetUpsert(true))
+			models = append(models, mongo.NewUpdateOneModel().SetFilter(bson.M{"_id": prefix + string(char)}).SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).SetUpsert(true))
 		}
 		_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.BulkWrite(context.TODO(), models)
 	}
-
 	pc.updateTaskStatus(prefix, "done")
 	return client, token
 }
 
 func (pc *ParallelCrawler) updateTaskStatus(id, status string) {
-	_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.UpdateOne(
-		context.TODO(),
-		bson.M{"_id": id},
-		bson.M{"$set": bson.M{"status": status, "finished_at": time.Now()}},
-	)
-}
-
-func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client *http.Client, token string) {
-	totalPages := (totalCount / 100) + 1
-	if totalPages > 100 { totalPages = 100 }
-	sem := make(chan struct{}, pageConcurrency)
-	var wg sync.WaitGroup
-	for p := 1; p <= totalPages; p++ {
-		wg.Add(1); sem <- struct{}{}
-		go func(page int) {
-			defer wg.Done(); defer func() { <-sem }()
-			res, _, _ := pc.fetchPage(keyword, page, client, token, 0)
-			if res != nil { pc.processResults(res.Repositories) }
-		}(p)
-	}
-	wg.Wait()
+	_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.UpdateOne(context.TODO(), bson.M{"_id": id}, bson.M{"$set": bson.M{"status": status, "finished_at": time.Now()}})
 }
 
 func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string, backoff time.Duration) (*V2SearchResponse, *http.Client, string) {
@@ -254,25 +213,17 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 	if token != "" { req.Header.Add("Authorization", "JWT "+token) }
 
 	resp, err := client.Do(req)
-	if err != nil { return nil, client, token }
+	if err != nil {
+		myutils.Logger.Error(fmt.Sprintf("Request failed for %q page %d: %v", query, page, err))
+		return nil, client, token
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		// Exponential Backoff logic
-		if backoff == 0 {
-			backoff = 10 * time.Second
-		} else {
-			backoff *= 2
-		}
-		
-		// Cap backoff at 15 minutes to avoid hanging forever
-		if backoff > 15 * time.Minute {
-			backoff = 15 * time.Minute
-		}
-
-		myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q page %d. Sleeping %v before retry...", query, page, backoff))
+		if backoff == 0 { backoff = 10 * time.Second } else { backoff *= 2 }
+		if backoff > 15 * time.Minute { backoff = 15 * time.Minute }
+		myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q page %d. Backoff: %v", query, page, backoff))
 		time.Sleep(backoff)
-		
 		newC, newT := pc.IM.GetNextClient()
 		return pc.fetchPage(query, page, newC, newT, backoff)
 	}
