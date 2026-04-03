@@ -6,7 +6,7 @@
 
 ## 1. Visão Geral da Pipeline
 
-O upstream original (`NSSL-SJTU/DITector`) é integralmente escrito em Go e implementa os estágios II e III (construção do grafo IDEA e ranqueamento). O Estágio I — descoberta de repositórios — não existia. Este fork adiciona o Estágio I e introduz otimizações transversais nos módulos compartilhados.
+O upstream original (`NSSL-SJTU/DITector`) é integralmente escrito em Go e implementa os estágios II e III (construção do grafo IDEA e ranqueamento). O Estágio I estava declarado como subcomando `crawl` em `cmd/cmd.go` — com descrição "crawl metadata of repositories and images from Docker Hub" — mas sem campo `Run`: o comando era registrado sem implementação. Este fork implementa o corpo completo do Estágio I e reengenharia o Estágio II para operação paralela em larga escala.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -31,7 +31,7 @@ O upstream original (`NSSL-SJTU/DITector`) é integralmente escrito em Go e impl
 
 ---
 
-## 2. Estágio I — Crawler DFS
+## 2. Estágio I — Crawler DFS (implementação do stub upstream)
 
 ### 2.1. Restrições da API do Docker Hub
 

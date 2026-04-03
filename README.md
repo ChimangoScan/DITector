@@ -155,13 +155,13 @@ O paper define dois conjuntos de imagens de alto impacto:
 
 ## 4. O que este fork modifica
 
-O upstream original (`NSSL-SJTU/DITector`) focava em análise de segurança de imagens já coletadas. Este fork adiciona a **pipeline de coleta e priorização** completa, necessária para o objetivo de scanning dinâmico em larga escala.
+O upstream original (`NSSL-SJTU/DITector`) declarava o subcomando `crawl` mas sem implementação (campo `Run` ausente no `cobra.Command` correspondente). Os estágios II e III estavam funcionais. Este fork implementa o Estágio I completo e reengenharia o Estágio II para operação paralela em larga escala.
 
 ### 4.1 Novo pacote `crawler/`
 
 **Arquivo:** `crawler/crawler.go`
 
-Implementação nativa em Go do crawler distribuído descrito no paper. O upstream original não possuía estágio de crawling — o Estágio I é inteiramente novo neste fork.
+Implementação do crawler distribuído descrito no paper. O upstream original declarava o subcomando `crawl` em `cmd/cmd.go` mas sem campo `Run` — o comando era um stub registrado sem implementação. Este fork implementa o corpo completo do Estágio I.
 
 **Design:**
 - `ParallelCrawler` gerencia N workers concorrentes via `sync.WaitGroup`
@@ -222,7 +222,7 @@ func GetV2SearchURL(query string, page, size int) string
 
 O parâmetro `ordering=-pull_count` garante que a janela de 10.000 resultados seja determinística e ordenada por popularidade, não aleatória — crítico para consistência entre páginas durante o DFS.
 
-O upstream não usava esta API — simplesmente não havia estágio de crawling no upstream.
+O upstream declarava o subcomando `crawl` como stub sem implementação e não utilizava nenhuma API de busca.
 
 ### 4.4 Modificações em `myutils/mongo.go`
 
@@ -809,7 +809,7 @@ docker-scan calculate  — Calcula o node ID de uma imagem pelo digest
 
 ### Por que o crawler foi implementado em Go (e não em Python como mencionado em versões anteriores)?
 
-O upstream original era inteiramente Go mas **não possuía estágio de crawling** — o Estágio I é completamente novo neste fork. Go foi mantido como linguagem única pela consistência de stack e pelas vantagens para este caso de uso:
+O upstream original declarava o subcomando `crawl` em `cmd/cmd.go` com descrição "crawl metadata of repositories and images from Docker Hub", porém sem campo `Run` — o comando era registrado mas não executava nenhuma lógica. O Estágio I foi implementado neste fork em Go pela consistência de stack e pelas vantagens para este caso de uso:
 - **Goroutines**: escala para centenas de workers de I/O com ~2KB/goroutine (vs ~1MB/thread OS)
 - **Channels**: comunicação entre stages type-safe sem locks manuais
 - **Único binário**: deploy trivial em múltiplas máquinas, sem runtime externo

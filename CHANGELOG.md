@@ -6,7 +6,7 @@
 
 ### Adicionado
 
-**`crawler/` (pacote novo — Estágio I):**
+**`crawler/` (implementação do Estágio I — stub sem `Run` no upstream):**
 - `crawler/crawler.go`: `ParallelCrawler` com DFS recursivo sobre espaço de prefixos do Docker Hub. N workers independentes, cada um executando `crawlDFS` recursivamente a partir de suas seeds. Deduplicação em memória via `seenRepos sync.Map`. Aprofundamento forçado para prefixos de 1 caractere. Goroutine `repoWriter` com `BulkWrite` ao MongoDB a cada 2s ou 1.000 repositórios. Checkpointing post-order por keyword via coleção `crawler_keywords`.
 - `crawler/auth_proxy.go`: `IdentityManager` — carrega contas Docker Hub de `accounts.json` e proxies de arquivo texto; auto-login JWT com `sync.Mutex`; rotação round-robin de identidades via `GetNextClient()`.
 
@@ -60,4 +60,4 @@
 
 ## [1.0.0] — baseline upstream (NSSL-SJTU/DITector)
 
-Pipeline original sem Estágio I. Implementa: `buildgraph/build.go` (inserção síncrona por layer no Neo4j), `myutils/`, `scripts/`, `analyzer/`, `cmd/`, `main.go`.
+Pipeline original com subcomando `crawl` declarado em `cmd/cmd.go` sem campo `Run` (stub sem implementação). Estágios II e III funcionais. Implementa: `buildgraph/build.go` (inserção síncrona por layer no Neo4j), `myutils/`, `scripts/`, `analyzer/`, `cmd/`, `main.go`.
