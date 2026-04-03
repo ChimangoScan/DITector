@@ -117,8 +117,13 @@ func (im *IdentityManager) GetNextClient() (*http.Client, string) {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 
-	transport := &http.Transport{}
-	
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		MaxConnsPerHost:     20,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
 	if len(im.Proxies) > 0 {
 		proxyURL, _ := url.Parse(im.Proxies[im.proxyIdx])
 		transport.Proxy = http.ProxyURL(proxyURL)

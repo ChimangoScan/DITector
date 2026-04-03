@@ -12,9 +12,8 @@ import (
 )
 
 // pageConcurrency controls how many pages of a single keyword are fetched in
-// parallel. Kept conservative (5) to stay under Docker Hub rate limits while
-// still being ~5× faster than serial pagination.
-const pageConcurrency = 5
+// parallel. With identity rotation on 429, we can afford more parallelism.
+const pageConcurrency = 8
 
 // parseRepoName splits "namespace/name" from the V2 API repo_name field.
 // Official images (e.g. "nginx") are treated as "library/nginx".
@@ -41,7 +40,7 @@ type ParallelCrawler struct {
 func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 	return &ParallelCrawler{
 		WorkerCount: workers,
-		KeywordChan: make(chan string, 1000000), // Buffer for DFS keywords
+		KeywordChan: make(chan string, 1000000),
 		IM:          im,
 	}
 }
@@ -50,8 +49,9 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 // seed characters assigned to shard index `shard` (0-based).
 //
 // Example with total=2:
-//   shard 0 → "abcdefghijklmnopqrs"   (first 19 of 38)
-//   shard 1 → "tuvwxyz0123456789-_"   (last 19 of 38)
+//
+//	shard 0 → "abcdefghijklmnopqrs"   (first 19 of 38)
+//	shard 1 → "tuvwxyz0123456789-_"   (last 19 of 38)
 //
 // This is the meet-in-the-middle partitioning: each machine independently
 // explores a disjoint half of the DFS keyword tree. No coordination is needed
@@ -101,12 +101,14 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 	pc.WG.Wait()
 }
 
+// worker pulls keywords from the channel and processes them. The identity
+// (HTTP client + JWT token) is kept as local state and rotated whenever a 429
+// is encountered, so no worker ever sleeps waiting for its rate limit to reset.
 func (pc *ParallelCrawler) worker() {
 	defer pc.WG.Done()
-	// Each worker gets its own identity rotation client
 	client, token := pc.IM.GetNextClient()
 	for keyword := range pc.KeywordChan {
-		pc.crawlKeyword(keyword, client, token)
+		client, token = pc.crawlKeyword(keyword, client, token)
 	}
 }
 
@@ -117,15 +119,17 @@ type V2Repository struct {
 }
 
 type V2SearchResponse struct {
-	Count      int            `json:"count"`
+	Count        int            `json:"count"`
 	Repositories []V2Repository `json:"results"`
 }
 
-func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) {
-	// Resume: skip keywords that were fully crawled in a previous run.
+// crawlKeyword processes one keyword and returns the (possibly rotated)
+// identity to use for the next keyword. On 429 the keyword is re-enqueued
+// and a fresh identity is returned immediately — no sleep.
+func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, token string) (*http.Client, string) {
 	if myutils.GlobalDBClient.MongoFlag && myutils.GlobalDBClient.Mongo.IsKeywordCrawled(keyword) {
 		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] already crawled, skipping", keyword))
-		return
+		return client, token
 	}
 
 	url := myutils.GetV2SearchURL(keyword, 1, 100)
@@ -134,38 +138,34 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 	if token != "" {
 		req.Header.Add("Authorization", "JWT "+token)
 	}
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		myutils.Logger.Error(fmt.Sprintf("Request failed for keyword [%s]: %v", keyword, err))
-		return
+		return client, token
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] got 429. Sleeping 60s then re-queuing...", keyword))
-		time.Sleep(60 * time.Second)
-		pc.KeywordChan <- keyword // re-enqueue so no keyword is permanently lost
-		return
+		// Rotate identity immediately — no sleep. Re-enqueue the keyword so it
+		// is retried by the next available worker (possibly with a different account).
+		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] got 429. Rotating identity...", keyword))
+		pc.KeywordChan <- keyword
+		return pc.IM.GetNextClient()
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		myutils.Logger.Warn(fmt.Sprintf("Keyword [%s] got status %d", keyword, resp.StatusCode))
-		return
+		return client, token
 	}
 
 	var searchRes V2SearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
 		myutils.Logger.Error(fmt.Sprintf("JSON decode failed for keyword [%s]: %v", keyword, err))
-		return
+		return client, token
 	}
 
-	// 2. DFS Strategy
 	if searchRes.Count >= 10000 && len(keyword) < 5 {
-		// Keyword has too many results — deepen the DFS tree. Do NOT mark as
-		// crawled: child keywords carry the actual data and will be marked
-		// individually. On restart, deepening re-runs cheaply (just enqueues
-		// children; already-crawled children are skipped immediately).
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] has %d results. Deepening DFS...", keyword, searchRes.Count))
 		for _, char := range alphabet {
 			pc.KeywordChan <- keyword + string(char)
@@ -180,11 +180,11 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 		}
 	} else {
 		myutils.Logger.Debug(fmt.Sprintf("Keyword [%s] returned 0 results.", keyword))
-		// Mark zero-result keywords as done so they are never retried.
 		if myutils.GlobalDBClient.MongoFlag {
 			_ = myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
 		}
 	}
+	return client, token
 }
 
 func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client *http.Client, token string) {
@@ -207,13 +207,15 @@ func (pc *ParallelCrawler) scrapeAllPages(keyword string, totalCount int, client
 	wg.Wait()
 }
 
+// processPage fetches one results page. On 429 it rotates the identity once
+// and retries — avoiding the old 10 s sleep that stalled all pages in a batch.
 func (pc *ParallelCrawler) processPage(url string, client *http.Client, token string) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	if token != "" {
 		req.Header.Add("Authorization", "JWT "+token)
 	}
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		myutils.Logger.Error(fmt.Sprintf("Page request failed: %v", err))
@@ -222,7 +224,28 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		time.Sleep(10 * time.Second)
+		// Rotate identity and retry once before giving up on this page.
+		resp.Body.Close()
+		newClient, newToken := pc.IM.GetNextClient()
+		req2, _ := http.NewRequest("GET", url, nil)
+		req2.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		if newToken != "" {
+			req2.Header.Add("Authorization", "JWT "+newToken)
+		}
+		resp2, err2 := newClient.Do(req2)
+		if err2 != nil || resp2.StatusCode != http.StatusOK {
+			if resp2 != nil {
+				resp2.Body.Close()
+			}
+			return
+		}
+		// Replace resp with the successful retry response
+		defer resp2.Body.Close()
+		var searchRes V2SearchResponse
+		if err := json.NewDecoder(resp2.Body).Decode(&searchRes); err != nil {
+			return
+		}
+		pc.saveRepos(searchRes.Repositories)
 		return
 	}
 
@@ -230,14 +253,15 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
 		return
 	}
+	pc.saveRepos(searchRes.Repositories)
+}
 
-	repos := make([]*myutils.Repository, 0, len(searchRes.Repositories))
-	for _, v2repo := range searchRes.Repositories {
+func (pc *ParallelCrawler) saveRepos(v2repos []V2Repository) {
+	repos := make([]*myutils.Repository, 0, len(v2repos))
+	for _, v2repo := range v2repos {
 		if v2repo.RepoName == "" {
 			continue
 		}
-		// V2 API returns repo_name as "namespace/name" (e.g. "library/nginx").
-		// repo_owner is often null for official images, so we parse from repo_name.
 		ns, name := parseRepoName(v2repo.RepoName)
 		repos = append(repos, &myutils.Repository{
 			Namespace: ns,
@@ -254,3 +278,6 @@ func (pc *ParallelCrawler) processPage(url string, client *http.Client, token st
 		}
 	}
 }
+
+// keep compiler happy — time is used in auth_proxy.go
+var _ = time.Second

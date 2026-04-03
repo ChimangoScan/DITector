@@ -38,7 +38,8 @@ services:
     # Meet-in-the-middle: shard 1/2 covers keywords starting with t–_ (19 root chars).
     # node1 runs docker-compose.yml with --shard 0 --shards 2 (a–s).
     command: >
-      sh -c "go run main.go crawl
+      sh -c "go build -o /tmp/ditector . &&
+        /tmp/ditector crawl
         --workers 50
         --shard 1
         --shards 2
