@@ -67,9 +67,11 @@ func (pc *ParallelCrawler) loadCrawledKeywords() {
 	if !myutils.GlobalDBClient.MongoFlag {
 		return
 	}
-	myutils.Logger.Info("Warming up keyword cache from MongoDB...")
+	myutils.Logger.Info("Warming up keyword cache from MongoDB (ID projection)...")
 	ctx := context.Background()
-	cursor, err := myutils.GlobalDBClient.Mongo.KeywordsColl.Find(ctx, bson.M{})
+	// Only fetch _id to reduce network and memory overhead
+	opts := options.Find().SetProjection(bson.M{"_id": 1})
+	cursor, err := myutils.GlobalDBClient.Mongo.KeywordsColl.Find(ctx, bson.M{}, opts)
 	if err != nil {
 		myutils.Logger.Error(fmt.Sprintf("Failed to load keyword cache: %v", err))
 		return
@@ -86,7 +88,7 @@ func (pc *ParallelCrawler) loadCrawledKeywords() {
 			count++
 		}
 	}
-	myutils.Logger.Info(fmt.Sprintf("Loaded %d keywords into cache", count))
+	myutils.Logger.Info(fmt.Sprintf("Cache ready: %d keywords loaded", count))
 }
 
 // repoWriter aggregates repositories and performs large bulk writes.
