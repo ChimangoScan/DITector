@@ -38,6 +38,10 @@ start:
 stop:
 	docker-compose $(_PROFILES) stop
 
+clean-containers:
+	@echo "Limpando containers fantasmas do projeto..."
+	@docker ps -a | grep ditector | awk '{print $$1}' | xargs -r docker rm -f
+
 update:
 	git fetch origin master && git reset --hard origin/master
 	@$(MAKE) start
