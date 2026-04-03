@@ -171,7 +171,8 @@ func connectDBs() {
 		fmt.Println("[-] Connect to Neo4j failed (optional)")
 	} else {
 		// Verify connection with a timeout to avoid hanging
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		const timeout = 5 * time.Second
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		if err := GlobalDBClient.Neo4j.Driver.VerifyConnectivity(ctx); err != nil {
 			GlobalDBClient.Neo4jFlag = false
