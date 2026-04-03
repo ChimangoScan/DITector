@@ -168,7 +168,7 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 
 	for i := 0; i < pc.WorkerCount; i++ {
 		pc.WG.Add(1)
-		go pc.worker()
+		go pc.worker(i)
 	}
 
 	if len(seeds) > 0 {
@@ -187,12 +187,34 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 	close(pc.RepoChan)
 }
 
-// worker pulls keywords from the channel and processes them. The identity
-// (HTTP client + JWT token) is kept as local state and rotated whenever a 429
-// is encountered, so no worker ever sleeps waiting for its rate limit to reset.
-func (pc *ParallelCrawler) worker() {
+// worker pulls keywords from the channel and processes them.
+func (pc *ParallelCrawler) worker(workerID int) {
 	defer pc.WG.Done()
-	client, token := pc.IM.GetNextClient()
+
+	var client *http.Client
+	var token string
+
+	// Strict Account Isolation: if workers == accounts, lock each worker to one account
+	if pc.WorkerCount == len(pc.IM.Accounts) {
+		acc := pc.IM.Accounts[workerID]
+		if acc.Token == "" {
+			pc.IM.LoginDockerHub(acc)
+		}
+		token = acc.Token
+		// Dedicated transport for this worker to avoid connection pooling issues between accounts
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				MaxConnsPerHost:     10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
+		myutils.Logger.Info(fmt.Sprintf("Worker %d strictly isolated to account: %s", workerID, acc.Username))
+	} else {
+		client, token = pc.IM.GetNextClient()
+	}
+
 	for keyword := range pc.KeywordChan {
 		client, token = pc.crawlKeyword(keyword, client, token)
 	}
