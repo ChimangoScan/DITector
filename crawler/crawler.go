@@ -49,7 +49,8 @@ type ParallelCrawler struct {
 	WG          sync.WaitGroup
 	IM          *IdentityManager
 	crawledKeys sync.Map
-	pending     int32 // Atomic counter for active/queued keywords
+	pending     int32      // Atomic counter for active/queued keywords
+	kwWriteWG   sync.WaitGroup // Tracks in-flight MarkKeywordCrawled goroutines
 }
 
 // NewParallelCrawler initializes a new crawler
@@ -149,7 +150,9 @@ func ShardSeeds(shard, total int) []string {
 func (pc *ParallelCrawler) Start(seeds []string) {
 	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [%d workers]", pc.WorkerCount))
 
-	go pc.repoWriter()
+	var repoWriterWG sync.WaitGroup
+	repoWriterWG.Add(1)
+	go func() { defer repoWriterWG.Done(); pc.repoWriter() }()
 
 	for i := 0; i < pc.WorkerCount; i++ {
 		pc.WG.Add(1)
@@ -193,6 +196,19 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 
 	pc.WG.Wait()
 	close(pc.RepoChan)
+	repoWriterWG.Wait() // espera o flush final antes de fechar o MongoDB
+	pc.kwWriteWG.Wait() // espera todos os checkpoints de keyword persistirem
+
+	// Limpa o checkpoint após uma DFS completa. Na próxima execução (restart
+	// automático), o crawler fará um novo crawl completo — encontrando containers
+	// novos adicionados ao Docker Hub desde o último ciclo.
+	if myutils.GlobalDBClient.MongoFlag {
+		if err := myutils.GlobalDBClient.Mongo.DropKeywordCheckpoint(); err != nil {
+			myutils.Logger.Warn(fmt.Sprintf("Failed to drop keyword checkpoint: %v", err))
+		} else {
+			myutils.Logger.Info("Keyword checkpoint cleared for next run cycle.")
+		}
+	}
 	myutils.Logger.Info("Discovery Phase Complete")
 }
 
@@ -277,9 +293,16 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 		return client, token
 	}
 
-	// Deepen Directly strategy
-	if searchRes.Count >= 10000 && len(keyword) < 255 {
+	// Deepen Directly strategy — save the first page before fanning out so
+	// top-pulled repos (e.g. library/nginx) that only appear in high-volume
+	// keywords are never permanently lost.
+	// Single-char keywords are forced to deepen regardless of count: Docker Hub
+	// treats 1-char queries as stopwords/below-min-gram, returning near-zero
+	// results even for common letters (e.g. 'b'=553 but 'ba'=176k). Deepening
+	// always is the only way to reach the real data at depth ≥ 2.
+	if (searchRes.Count >= 10000 || len(keyword) == 1) && len(keyword) < 255 {
 		myutils.Logger.Info(fmt.Sprintf("Keyword [%s] hits limit (%d). Fanning out...", keyword, searchRes.Count))
+		pc.saveRepos(searchRes.Repositories)
 		for _, char := range alphabet {
 			atomic.AddInt32(&pc.pending, 1)
 			pc.KeywordChan <- keyword + string(char)
@@ -299,7 +322,11 @@ func (pc *ParallelCrawler) crawlKeyword(keyword string, client *http.Client, tok
 func (pc *ParallelCrawler) markKeywordDone(keyword string) {
 	pc.crawledKeys.Store(keyword, true)
 	if myutils.GlobalDBClient.MongoFlag {
-		go myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
+		pc.kwWriteWG.Add(1)
+		go func() {
+			defer pc.kwWriteWG.Done()
+			myutils.GlobalDBClient.Mongo.MarkKeywordCrawled(keyword)
+		}()
 	}
 }
 

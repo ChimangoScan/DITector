@@ -12,6 +12,7 @@ services:
   crawler_node2:
     image: golang:1.22
     container_name: ditector_crawler_node2
+    restart: unless-stopped
     volumes:
       - .:/app
     working_dir: /app

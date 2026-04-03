@@ -23,6 +23,7 @@ services:
   crawler:
     image: golang:1.22
     container_name: ditector_crawler
+    restart: unless-stopped
     depends_on:
       - mongodb
       - neo4j

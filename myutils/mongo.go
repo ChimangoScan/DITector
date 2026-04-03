@@ -437,6 +437,12 @@ func (m *MyMongo) MarkKeywordCrawled(keyword string) error {
 	return err
 }
 
+// DropKeywordCheckpoint removes all crawled-keyword records. Called at the end
+// of a complete DFS run so the next restart performs a full re-crawl cycle.
+func (m *MyMongo) DropKeywordCheckpoint() error {
+	return m.KeywordsColl.Drop(context.TODO())
+}
+
 // --- Stage II checkpoint: per-repo graph build tracking ---
 
 // MarkRepoGraphBuilt sets graph_built_at on the repo document. Called by Stage II
