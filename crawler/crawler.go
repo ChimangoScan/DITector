@@ -210,7 +210,6 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		if resP != nil { 
 			pc.processResults(resP.Repositories)
 		} else {
-			// If a page fails mid-way, we consider the whole task failed to ensure completeness later
 			pc.updateTaskStatus(prefix, "pending")
 			return false, client, token
 		}
@@ -252,6 +251,14 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 			continue
 		}
 		defer resp.Body.Close()
+
+		// 401 Handle: Token expired or revoked. Forcing re-login.
+		if resp.StatusCode == 401 {
+			myutils.Logger.Warn(fmt.Sprintf("401 Unauthorized for %q. Revoking token and logging in again...", query))
+			pc.IM.ClearToken(token)
+			newC, newT := pc.IM.GetNextClient()
+			return nil, pc.getNewHTTPClient(), newT
+		}
 
 		if resp.StatusCode == 429 {
 			myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q. Rotating account...", query))
