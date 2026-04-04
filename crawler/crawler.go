@@ -24,11 +24,14 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-var userAgents = []string{
+// User-Agents split by platform to differentiate Node 1 from Node 2
+var uaWindows = []string{
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
+var uaLinuxMac = []string{
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 }
 
 var pageConcurrency = func() int {
@@ -55,7 +58,6 @@ type ParallelCrawler struct {
 	IM          *IdentityManager
 	seenRepos   sync.Map
 	pending     int32
-	userAgent   string
 }
 
 func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
@@ -63,7 +65,6 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 		WorkerCount: workers,
 		RepoChan:    make(chan *myutils.Repository, 100000),
 		IM:          im,
-		userAgent:   userAgents[rand.Intn(len(userAgents))],
 	}
 }
 
@@ -165,8 +166,8 @@ func (pc *ParallelCrawler) getNewHTTPClient() *http.Client {
 	}
 }
 
-func (pc *ParallelCrawler) setBrowserHeaders(req *http.Request, token string) {
-	req.Header.Set("User-Agent", pc.userAgent)
+func (pc *ParallelCrawler) setBrowserHeaders(req *http.Request, token, ua string) {
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Referer", "https://hub.docker.com/search?q=library")
@@ -184,8 +185,16 @@ func (pc *ParallelCrawler) setBrowserHeaders(req *http.Request, token string) {
 
 func (pc *ParallelCrawler) worker(id int) {
 	defer pc.WG.Done()
-	// Each worker gets its own persona
-	pc.userAgent = userAgents[rand.Intn(len(userAgents))]
+	
+	// Machine-specific identity differentiation
+	role := os.Getenv("ROLE")
+	var myUA string
+	if role == "primary" {
+		myUA = uaWindows[rand.Intn(len(uaWindows))]
+	} else {
+		myUA = uaLinuxMac[rand.Intn(len(uaLinuxMac))]
+	}
+
 	client, token := pc.IM.GetNextClient()
 
 	for {
@@ -193,14 +202,13 @@ func (pc *ParallelCrawler) worker(id int) {
 		if prefix == "" { break }
 		
 		atomic.AddInt32(&pc.pending, 1)
-		success, nextClient, nextToken := pc.processTask(prefix, client, token)
+		success, nextClient, nextToken := pc.processTask(prefix, client, token, myUA)
 		client, token = nextClient, nextToken
 		atomic.AddInt32(&pc.pending, -1)
 
 		if !success {
 			time.Sleep(5 * time.Second)
 		}
-		// Inter-task jitter to avoid synchronized bursts
 		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 	}
 }
@@ -220,10 +228,10 @@ func (pc *ParallelCrawler) getNextTask() string {
 	return doc.ID
 }
 
-func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token string) (bool, *http.Client, string) {
+func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token, ua string) (bool, *http.Client, string) {
 	myutils.Logger.Info(fmt.Sprintf("Processing Prefix: [%s]", prefix))
 	
-	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token)
+	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token, ua)
 	client, token = nextClient, nextToken
 	if res == nil {
 		pc.updateTaskStatus(prefix, "pending")
@@ -235,7 +243,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 	if pages > 100 { pages = 100 }
 	for p := 2; p <= pages; p++ {
 		time.Sleep(time.Duration(400 + rand.Intn(500)) * time.Millisecond)
-		resP, c, t := pc.fetchPage(prefix, p, client, token)
+		resP, c, t := pc.fetchPage(prefix, p, client, token, ua)
 		client, token = c, t
 		if resP != nil { 
 			pc.processResults(resP.Repositories)
@@ -265,11 +273,11 @@ func (pc *ParallelCrawler) updateTaskStatus(id, status string) {
 	_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": status, "finished_at": time.Now()}})
 }
 
-func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token string) (*V2SearchResponse, *http.Client, string) {
+func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token, ua string) (*V2SearchResponse, *http.Client, string) {
 	for attempts := 0; attempts < 3; attempts++ {
 		url := myutils.GetV2SearchURL(query, page, 100)
 		req, _ := http.NewRequest("GET", url, nil)
-		pc.setBrowserHeaders(req, token)
+		pc.setBrowserHeaders(req, token, ua)
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -285,6 +293,13 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 		if resp.StatusCode == 401 {
 			myutils.Logger.Warn(fmt.Sprintf("401 Unauthorized for %q. Invalidating token and rotating...", query))
 			pc.IM.ClearToken(token)
+			newC, newT := pc.IM.GetNextClient()
+			return nil, newC, newT
+		}
+
+		if resp.StatusCode == 403 {
+			myutils.Logger.Error(fmt.Sprintf("CRITICAL: 403 Forbidden for %q. High bot score detected. Sleeping 15m...", query))
+			time.Sleep(15 * time.Minute)
 			newC, newT := pc.IM.GetNextClient()
 			return nil, newC, newT
 		}
