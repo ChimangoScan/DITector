@@ -113,72 +113,104 @@ PreloadExistingRepos():
 
 **Escala:** 5,2 milhões de registros ocupam aproximadamente 300 MB de RAM. O sistema suporta até 100 milhões de registros com consumo inferior a 6 GB, dentro dos limites de servidores de pesquisa típicos.
 
-### 2.4. Impersonação de Navegador e Evasão Anti-Bot
+### 2.4. Estratégia Anti-Detecção — Modelo de Ameaças e Contramedidas
 
-O sistema implementa três camadas de camuflagem para contornar a detecção de tráfego automatizado pelo WAF/Cloudflare do Docker Hub.
+O Docker Hub opera atrás do Cloudflare com inspeção comportamental em múltiplas camadas. O sistema implementa uma pilha de defesa correspondente, com uma contramedida por vetor de detecção.
 
-#### 2.4.1. Fingerprinting TLS (JA3)
+#### 2.4.1. Vetor: Fingerprint TLS (JA3)
 
-A stack de rede padrão do Go possui uma assinatura JA3 identificável como script. O `http.Transport` é configurado para emular o Chrome 121:
+**Ameaça:** a stack `net/http` padrão do Go negocia cifras TLS em ordem diferente de qualquer navegador real. O hash JA3 resultante é instantaneamente identificável como script automatizado, independentemente do User-Agent declarado.
+
+**Contramedida:** o `http.Transport` é configurado para emular o Chrome 121:
 
 ```go
-transport := &http.Transport{
-    TLSClientConfig: &tls.Config{
-        MinVersion:               tls.VersionTLS12,
-        PreferServerCipherSuites: false,
-    },
-    // HTTP/2 desativado: conexões HTTP/1.1 atômicas permitem que
-    // timeouts funcionem deterministicamente (ver seção 6).
+&tls.Config{
+    MinVersion:               tls.VersionTLS12,
+    PreferServerCipherSuites: false, // deixa o servidor ordenar as cifras
 }
 ```
 
-A desativação do HTTP/2 é crítica: o multiplexing HTTP/2 mantinha conexões half-open quando o servidor Docker Hub aplicava técnicas de tarpit (ver seção 6.1), bloqueando workers indefinidamente.
+O HTTP/2 é deliberadamente desabilitado. Além da diferença de fingerprint, o multiplexing HTTP/2 cria um vetor adicional: quando o servidor aplica tarpit (seção 6.1), conexões half-open bloqueiam workers indefinidamente. Com HTTP/1.1, cada conexão é atômica — timeouts funcionam deterministicamente.
 
-#### 2.4.2. Headers de Alta Fidelidade
+#### 2.4.2. Vetor: Headers Anômalos
 
-`setBrowserHeaders` injeta o conjunto completo de headers de uma navegação Chrome real:
+**Ameaça:** requisições Go sem configuração explícita omitem headers presentes em todo navegador real (`Sec-Fetch-*`, `Referer`, `Accept-Language`). A ausência desses campos é um sinal de baixa fidelidade no scoring do WAF.
+
+**Contramedida:** `setBrowserHeaders` injeta o conjunto completo de headers de uma requisição XHR do Chrome 121 para a API do Docker Hub:
 
 ```go
-req.Header.Set("User-Agent", ua)
-req.Header.Set("Accept", "application/json, text/plain, */*")
+req.Header.Set("Accept",          "application/json, text/plain, */*")
 req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-req.Header.Set("Referer", "https://hub.docker.com/search?q=library")
-req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
-req.Header.Set("Sec-Fetch-Dest", "empty")
-req.Header.Set("Sec-Fetch-Mode", "cors")
-req.Header.Set("Sec-Fetch-Site", "same-origin")
-req.Header.Set("Connection", "keep-alive")
+req.Header.Set("Referer",         "https://hub.docker.com/search?q=library")
+req.Header.Set("Sec-Ch-Ua-Mobile","?0")
+req.Header.Set("Sec-Fetch-Dest",  "empty")
+req.Header.Set("Sec-Fetch-Mode",  "cors")
+req.Header.Set("Sec-Fetch-Site",  "same-origin")
+req.Header.Set("Connection",      "keep-alive")
 ```
 
-#### 2.4.3. Identidade Persistente por Conta (Sticky UA)
+O `Referer` e os `Sec-Fetch-*` reconstituem o contexto de navegação esperado por um usuário que busca repos na interface do Docker Hub.
 
-Cada conta JWT recebe um User-Agent fixo e exclusivo no momento do carregamento (`LoadIdentities`). Esta vinculação é mantida durante toda a execução: a mesma conta sempre usa o mesmo UA, tanto no login quanto nas requisições subsequentes.
+#### 2.4.3. Vetor: Correlação de Identidade entre Requisições
 
-A diferenciação entre nós do cluster (ex.: Nó 1 emulando Windows, Nó 2 emulando Linux/Mac) dilui a correlação estatística do tráfego gerado pelo cluster.
+**Ameaça:** um WAF com estado pode correlacionar múltiplas contas vindas do mesmo IP com o mesmo User-Agent. Se conta A e conta B nunca coexistem no tráfego de um navegador real com o mesmo UA, a combinação é detectável.
 
-#### 2.4.4. Body Draining (Keep-Alive TCP)
+**Contramedida:** identidade persistente por conta (Sticky UA). No carregamento, cada conta recebe um User-Agent fixo e exclusivo via round-robin sobre o pool de 7 strings:
 
-Após cada resposta, o corpo é lido completamente via `io.ReadAll(resp.Body)` antes do `Close`. Em Go, isso é obrigatório para que o socket TCP seja devolvido ao pool de conexões. Sem o dreno, o `Transport` abre novos sockets a cada requisição — padrão detectável como bot e ineficiente em termos de latência TLS.
+```
+Chrome 121 / Windows
+Chrome 121 / Mac
+Chrome 121 / Linux
+Edge 121   / Windows
+Firefox 122 / Windows
+Safari 17  / Mac
+Chrome 119 / Windows (versão ligeiramente defasada)
+```
 
-### 2.5. Tratamento de Erros HTTP e Backoff
+A mesma conta sempre usa o mesmo UA em todas as requisições — login, busca, manifests. Do ponto de vista do servidor, cada conta é um "navegador" distinto e coerente. A diferenciação entre nós (Nó 1 emula Windows, Nó 2 emula Linux/Mac) dilui a correlação estatística no nível do cluster.
+
+#### 2.4.4. Vetor: Padrão de Abertura de Sockets
+
+**Ameaça:** bots sem controle de conexão abrem um novo socket TCP por requisição. A taxa de handshakes TLS por IP (observável pelo servidor) é um sinal de bot forte e independente dos headers.
+
+**Contramedida (a):** pool de conexões ativo. `DisableKeepAlives` foi removido do `http.Transport` do upstream. `MaxIdleConns=100`, `IdleConnTimeout=90s` mantêm sockets abertos entre requisições do mesmo worker.
+
+**Contramedida (b):** body draining. Em Go, um socket só é devolvido ao pool se o corpo da resposta for lido até o fim antes do `Close`. `fetchPage` usa `io.ReadAll(resp.Body)` em vez de `resp.Body.Close()` diretamente — garante que cada socket seja reutilizado na próxima requisição do mesmo worker.
+
+#### 2.4.5. Vetor: Padrão Temporal Rítmico
+
+**Ameaça:** intervalos fixos entre requisições são estatisticamente improváveis para navegação humana e detectáveis por análise de frequência.
+
+**Contramedida:** dois níveis de jitter aleatório:
+- Entre páginas de um mesmo prefixo: `400 + rand.Intn(500)` ms → intervalo uniforme em [400, 900] ms
+- Entre tarefas consecutivas do worker: `rand.Intn(1000)` ms → [0, 1000] ms
+
+---
+
+### 2.5. Tratamento de Erros HTTP — Semântica de Re-enfileiramento
+
+Quando `fetchPage` detecta um erro HTTP, não há retry inline. A função retorna `nil`; `processTask` interpreta isso como falha e chama `updateTaskStatus(prefix, "pending")`. A tarefa volta para a fila e será processada por qualquer worker disponível na próxima iteração — inclusive com nova identidade se a rotação tiver ocorrido.
 
 ```
 fetchPage(query, page, client, token, ua):
   for attempts in [0, 3):
     resp = client.Do(req)
+    io.ReadAll(resp.Body)  // body draining obrigatório
 
-    401 → ClearToken(token); GetNextClient(); return nil  // JWT expirado: forçar re-login
-    403 → sleep 15 min; GetNextClient(); return nil       // Bot score alto: esfriar IP
-    429 → sleep 15s; GetNextClient(); return nil          // Rate limit: rotacionar identidade
+    401 → ClearToken(token) + GetNextClient() → return nil
+    403 → sleep 15 min     + GetNextClient() → return nil
+    429 → sleep 15 s       + GetNextClient() → return nil
     !200 → return nil
-    OK  → decode JSON; return response
+    OK  → json.Unmarshal; return response
 ```
 
-- **401:** `ClearToken` invalida o token expirado na conta correspondente. Na próxima chamada a `GetNextClient`, a conta sem token dispara `LoginDockerHub` automaticamente.
-- **403:** sono de 15 minutos antes de retomar com nova identidade. Indica pontuação de bot elevada — rotação imediata sem espera é contraproducente.
-- **429:** rotação imediata de identidade com delay de 15s.
+**401 — JWT expirado:** `ClearToken` zera o campo `Token` da conta correspondente. Na próxima chamada a `GetNextClient`, a conta sem token dispara `LoginDockerHub` automaticamente, obtendo novo JWT. O sleep é zero: a conta simplesmente troca de sessão.
 
-Na ausência de erros, cada página aguarda um intervalo aleatório entre **400 ms e 900 ms** antes da próxima requisição (jitter), evitando a detecção de padrão rítmico de bots.
+**403 — Bot score alto:** indica que o IP ou a conta atingiu pontuação de bot elevada no scoring do Cloudflare. Rotação imediata sem espera seria contraproducente — o novo token chegaria de mesmo IP. Sleep de 15 minutos "esfria" o IP antes de retomar com nova identidade, permitindo que o score caia antes da próxima tentativa.
+
+**429 — Rate limit:** indica que a taxa de requisições da conta ou IP excedeu o limite. Sleep de 15 segundos com rotação imediata para outra conta distribui a pressão. Se todas as contas estiverem sob rate limit simultaneamente, a série de sleeps cumulativos tem o efeito de backoff distribuído.
+
+A tarefa nunca é perdida em nenhum desses casos: `updateTaskStatus(prefix, "pending")` é chamado em `processTask` antes de qualquer retorno por falha.
 
 ### 2.6. Gestão de Identidades — `crawler/auth_proxy.go`
 
