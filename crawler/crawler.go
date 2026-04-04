@@ -66,14 +66,11 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 	flush := func() {
 		if len(buffer) == 0 { return }
 		count := len(buffer)
-		
-		// BulkUpsertRepositories inside myutils already has a 30s timeout context.
 		err := myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(buffer)
 		if err != nil {
 			myutils.Logger.Error(fmt.Sprintf("DB ERROR during flush: %v", err))
 			return
 		}
-		
 		myutils.Logger.Info(fmt.Sprintf(">>> DATABASE UPDATE: Flushed %d NEW unique repos", count))
 		buffer = buffer[:0]
 	}
@@ -161,9 +158,17 @@ func (pc *ParallelCrawler) worker(id int) {
 	for {
 		prefix := pc.getNextTask()
 		if prefix == "" { break }
+		
 		atomic.AddInt32(&pc.pending, 1)
-		client, token = pc.processTask(prefix, client, token)
+		success, nextClient, nextToken := pc.processTask(prefix, client, token)
+		client, token = nextClient, nextToken
 		atomic.AddInt32(&pc.pending, -1)
+
+		if !success {
+			// Fail-safe: if task failed, cool down the worker to avoid tight-loop DoS
+			myutils.Logger.Warn(fmt.Sprintf("Worker %d: Task [%s] failed. Cooling down 5s...", id, prefix))
+			time.Sleep(5 * time.Second)
+		}
 	}
 }
 
@@ -174,24 +179,25 @@ func (pc *ParallelCrawler) getNextTask() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	
+	// Atomic Find and Update with Priority to oldest tasks to avoid re-picking failed tasks immediately
 	err := myutils.GlobalDBClient.Mongo.KeywordsColl.FindOneAndUpdate(
 		ctx,
 		bson.M{"status": "pending"},
 		bson.M{"$set": bson.M{"status": "processing", "started_at": time.Now()}},
-		options.FindOneAndUpdate().SetReturnDocument(options.After),
+		options.FindOneAndUpdate().SetReturnDocument(options.After).SetSort(bson.M{"finished_at": 1}),
 	).Decode(&doc)
 	if err != nil { return "" }
 	return doc.ID
 }
 
-func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token string) (*http.Client, string) {
+func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token string) (bool, *http.Client, string) {
 	myutils.Logger.Info(fmt.Sprintf("Processing Prefix: [%s]", prefix))
 	
 	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token)
 	client, token = nextClient, nextToken
 	if res == nil {
 		pc.updateTaskStatus(prefix, "pending")
-		return client, token
+		return false, client, token
 	}
 
 	pc.processResults(res.Repositories)
@@ -203,6 +209,10 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		client, token = c, t
 		if resP != nil { 
 			pc.processResults(resP.Repositories)
+		} else {
+			// If a page fails mid-way, we consider the whole task failed to ensure completeness later
+			pc.updateTaskStatus(prefix, "pending")
+			return false, client, token
 		}
 	}
 
@@ -218,7 +228,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 	}
 	
 	pc.updateTaskStatus(prefix, "done")
-	return client, token
+	return true, client, token
 }
 
 func (pc *ParallelCrawler) updateTaskStatus(id, status string) {
@@ -251,7 +261,10 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 			continue
 		}
 
-		if resp.StatusCode != http.StatusOK { return nil, client, token }
+		if resp.StatusCode != http.StatusOK { 
+			myutils.Logger.Error(fmt.Sprintf("Unexpected Status %d for %q", resp.StatusCode, query))
+			return nil, client, token 
+		}
 		var res V2SearchResponse
 		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return nil, client, token }
 		return &res, client, token
@@ -266,9 +279,7 @@ func (pc *ParallelCrawler) processResults(repos []struct {
 	for _, r := range repos {
 		if r.RepoName == "" { continue }
 		if _, seen := pc.seenRepos.LoadOrStore(r.RepoName, true); seen { continue }
-		
 		ns, name := parseRepoName(r.RepoName)
-		
 		select {
 		case pc.RepoChan <- &myutils.Repository{Namespace: ns, Name: name, PullCount: r.PullCount}:
 		default:
