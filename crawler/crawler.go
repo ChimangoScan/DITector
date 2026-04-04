@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"crypto/tls"
 	"io"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
@@ -21,6 +22,12 @@ import (
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
+}
+
+var userAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 }
 
 var pageConcurrency = func() int {
@@ -57,6 +64,40 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 	}
 }
 
+// PreloadExistingRepos loads all repository names from MongoDB into local RAM cache
+func (pc *ParallelCrawler) PreloadExistingRepos() {
+	if !myutils.GlobalDBClient.MongoFlag { return }
+	
+	myutils.Logger.Info("Pre-loading existing repository names into RAM cache... (this may take a minute)")
+	
+	coll := myutils.GlobalDBClient.Mongo.RepoColl
+	// Only fetch namespace and name to save memory and network
+	projection := bson.M{"namespace": 1, "name": 1, "_id": 0}
+	cursor, err := coll.Find(context.TODO(), bson.M{}, options.Find().SetProjection(projection))
+	if err != nil {
+		myutils.Logger.Error(fmt.Sprintf("Failed to preload repos: %v", err))
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	count := 0
+	for cursor.Next(context.TODO()) {
+		var r struct {
+			Namespace string `bson:"namespace"`
+			Name      string `bson:"name"`
+		}
+		if err := cursor.Decode(&r); err != nil { continue }
+		
+		fullName := r.Namespace + "/" + r.Name
+		pc.seenRepos.Store(fullName, true)
+		count++
+		if count % 500000 == 0 {
+			myutils.Logger.Info(fmt.Sprintf("Cached %d million repos...", count/1000000))
+		}
+	}
+	myutils.Logger.Info(fmt.Sprintf("Cache Warm-up Complete: %d repos loaded to RAM", count))
+}
+
 func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	buffer := make([]*myutils.Repository, 0, 1000)
@@ -88,6 +129,9 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 }
 
 func (pc *ParallelCrawler) Start(seeds []string) {
+	// Step 0: Cache Warm-up
+	pc.PreloadExistingRepos()
+
 	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [W:%d]", pc.WorkerCount))
 	
 	if len(seeds) == 0 {
@@ -153,8 +197,6 @@ func (pc *ParallelCrawler) setBrowserHeaders(req *http.Request, token, ua string
 
 func (pc *ParallelCrawler) worker(id int) {
 	defer pc.WG.Done()
-	
-	// Get initial identity (Client, Token, Sticky UA)
 	client, token, myUA := pc.IM.GetNextClient()
 
 	for {
