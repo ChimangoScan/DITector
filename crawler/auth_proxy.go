@@ -15,11 +15,22 @@ import (
 	"github.com/NSSL-SJTU/DITector/myutils"
 )
 
-// Account represents a Docker Hub account
+// Account represents a Docker Hub account with its own sticky User-Agent
 type Account struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Token    string `json:"token,omitempty"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	Token     string `json:"token,omitempty"`
+	UserAgent string `json:"-"` // Sticky UA assigned at runtime
+}
+
+var globalUAPool = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
 }
 
 // IdentityManager handles rotation of IPs and Accounts
@@ -31,11 +42,10 @@ type IdentityManager struct {
 	accIdx   int
 }
 
-// LoadIdentities loads proxies and accounts from JSON files
+// LoadIdentities loads proxies and accounts and assigns unique UAs
 func LoadIdentities(proxyFile, accountFile string) (*IdentityManager, error) {
 	im := &IdentityManager{}
 
-	// Load Proxies (one proxy URL per line, e.g. "http://user:pass@host:port")
 	if proxyFile != "" {
 		data, err := os.ReadFile(proxyFile)
 		if err == nil {
@@ -44,16 +54,18 @@ func LoadIdentities(proxyFile, accountFile string) (*IdentityManager, error) {
 					im.Proxies = append(im.Proxies, line)
 				}
 			}
-			fmt.Printf("Loaded %d proxies from %s\n", len(im.Proxies), proxyFile)
 		}
 	}
 
-	// Load Accounts
 	if accountFile != "" {
 		data, err := os.ReadFile(accountFile)
 		if err == nil {
 			json.Unmarshal(data, &im.Accounts)
-			fmt.Printf("Loaded %d accounts\n", len(im.Accounts))
+			// Assign unique sticky UA to each account
+			for i, acc := range im.Accounts {
+				acc.UserAgent = globalUAPool[i % len(globalUAPool)]
+			}
+			fmt.Printf("Loaded %d accounts with unique User-Agents\n", len(im.Accounts))
 		}
 	}
 
@@ -62,63 +74,43 @@ func LoadIdentities(proxyFile, accountFile string) (*IdentityManager, error) {
 
 var loginMu sync.Mutex
 
-// LoginDockerHub performs authentication and returns a JWT token
 func (im *IdentityManager) LoginDockerHub(acc *Account) error {
 	loginMu.Lock()
 	defer loginMu.Unlock()
 
-	// Check if another worker already got the token while we were waiting
-	if acc.Token != "" {
-		return nil
-	}
+	if acc.Token != "" { return nil }
 
 	myutils.Logger.Info(fmt.Sprintf("Attempting login for user: %s", acc.Username))
 	
-	loginURL := "https://hub.docker.com/v2/users/login/"
 	payload, _ := json.Marshal(map[string]string{
 		"username": acc.Username,
 		"password": acc.Password,
 	})
 
-	req, err := http.NewRequest("POST", loginURL, bytes.NewBuffer(payload))
-	if err != nil {
-		return err
-	}
+	req, _ := http.NewRequest("POST", "https://hub.docker.com/v2/users/login/", bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", acc.UserAgent) // Use account's sticky UA for login
 
-	// Use a clean client for login to avoid proxy issues during auth
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("login failed with status: %d, body: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("login failed status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var res struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return err
-	}
+	var res struct{ Token string `json:"token"` }
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return err }
 
 	acc.Token = res.Token
 	myutils.Logger.Info(fmt.Sprintf("Successfully obtained new JWT for %s", acc.Username))
 	return nil
 }
 
-// ClearToken finds the account that holds the given token and clears it so that
-// the next GetNextClient call for that account triggers a fresh login. This is
-// the correct response to an HTTP 401 (token expired or revoked).
 func (im *IdentityManager) ClearToken(token string) {
-	if token == "" {
-		return
-	}
+	if token == "" { return }
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	for _, acc := range im.Accounts {
@@ -129,42 +121,39 @@ func (im *IdentityManager) ClearToken(token string) {
 	}
 }
 
-// GetNextClient returns an http.Client and a valid Token (logins if necessary)
-func (im *IdentityManager) GetNextClient() (*http.Client, string) {
+// GetNextClient returns http.Client, Token and the Sticky User-Agent
+func (im *IdentityManager) GetNextClient() (*http.Client, string, string) {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 
 	transport := &http.Transport{
 		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		MaxConnsPerHost:     20,
 		IdleConnTimeout:     90 * time.Second,
-	}
-
-	if len(im.Proxies) > 0 {
-		proxyURL, _ := url.Parse(im.Proxies[im.proxyIdx])
-		transport.Proxy = http.ProxyURL(proxyURL)
-		im.proxyIdx = (im.proxyIdx + 1) % len(im.Proxies)
+		MaxIdleConnsPerHost: 10,
+		TLSHandshakeTimeout: 10 * time.Second,
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			PreferServerCipherSuites: false,
+		},
 	}
 
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   20 * time.Second,
+		Timeout:   30 * time.Second,
 	}
 
-	var authToken string
-	if len(im.Accounts) > 0 {
-		acc := im.Accounts[im.accIdx]
-		// Auto-login if token is empty
-		if acc.Token == "" {
-			err := im.LoginDockerHub(acc)
-			if err != nil {
-				myutils.Logger.Error(fmt.Sprintf("Auto-login failed for %s: %v", acc.Username, err))
-			}
-		}
-		authToken = acc.Token
-		im.accIdx = (im.accIdx + 1) % len(im.Accounts)
+	if len(im.Accounts) == 0 {
+		return client, "", globalUAPool[0]
 	}
 
-	return client, authToken
+	acc := im.Accounts[im.accIdx]
+	if acc.Token == "" {
+		_ = im.LoginDockerHub(acc)
+	}
+	
+	token := acc.Token
+	ua := acc.UserAgent
+	im.accIdx = (im.accIdx + 1) % len(im.Accounts)
+
+	return client, token, ua
 }

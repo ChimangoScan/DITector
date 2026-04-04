@@ -24,16 +24,6 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// User-Agents split by platform to differentiate Node 1 from Node 2
-var uaWindows = []string{
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
-var uaLinuxMac = []string{
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-}
-
 var pageConcurrency = func() int {
 	if v := os.Getenv("PAGE_CONCURRENCY"); v != "" {
 		var n int
@@ -147,33 +137,12 @@ func (pc *ParallelCrawler) ensureQueueInitialized(seeds []string) {
 	_, _ = coll.BulkWrite(context.TODO(), models)
 }
 
-func (pc *ParallelCrawler) getNewHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives:   false, 
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			MaxIdleConnsPerHost: 10,
-			TLSHandshakeTimeout: 10 * time.Second,
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-				PreferServerCipherSuites: false, 
-				CurvePreferences:         []tls.CurveID{tls.X25519, tls.CurveP256},
-			},
-			TLSNextProto: make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
-		},
-		Timeout: 30 * time.Second,
-	}
-}
-
 func (pc *ParallelCrawler) setBrowserHeaders(req *http.Request, token, ua string) {
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Referer", "https://hub.docker.com/search?q=library")
-	req.Header.Set("Sec-Ch-Ua", "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"121\", \"Google Chrome\";v=\"121\"")
 	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
-	req.Header.Set("Sec-Ch-Ua-Platform", "\"Windows\"")
 	req.Header.Set("Sec-Fetch-Dest", "empty")
 	req.Header.Set("Sec-Fetch-Mode", "cors")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -186,24 +155,16 @@ func (pc *ParallelCrawler) setBrowserHeaders(req *http.Request, token, ua string
 func (pc *ParallelCrawler) worker(id int) {
 	defer pc.WG.Done()
 	
-	// Machine-specific identity differentiation
-	role := os.Getenv("ROLE")
-	var myUA string
-	if role == "primary" {
-		myUA = uaWindows[rand.Intn(len(uaWindows))]
-	} else {
-		myUA = uaLinuxMac[rand.Intn(len(uaLinuxMac))]
-	}
-
-	client, token := pc.IM.GetNextClient()
+	// Get initial identity (Client, Token, Sticky UA)
+	client, token, myUA := pc.IM.GetNextClient()
 
 	for {
 		prefix := pc.getNextTask()
 		if prefix == "" { break }
 		
 		atomic.AddInt32(&pc.pending, 1)
-		success, nextClient, nextToken := pc.processTask(prefix, client, token, myUA)
-		client, token = nextClient, nextToken
+		success, nextClient, nextToken, nextUA := pc.processTask(prefix, client, token, myUA)
+		client, token, myUA = nextClient, nextToken, nextUA
 		atomic.AddInt32(&pc.pending, -1)
 
 		if !success {
@@ -228,14 +189,14 @@ func (pc *ParallelCrawler) getNextTask() string {
 	return doc.ID
 }
 
-func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token, ua string) (bool, *http.Client, string) {
+func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token, ua string) (bool, *http.Client, string, string) {
 	myutils.Logger.Info(fmt.Sprintf("Processing Prefix: [%s]", prefix))
 	
-	res, nextClient, nextToken := pc.fetchPage(prefix, 1, client, token, ua)
-	client, token = nextClient, nextToken
+	res, nextClient, nextToken, nextUA := pc.fetchPage(prefix, 1, client, token, ua)
+	client, token, ua = nextClient, nextToken, nextUA
 	if res == nil {
 		pc.updateTaskStatus(prefix, "pending")
-		return false, client, token
+		return false, client, token, ua
 	}
 
 	pc.processResults(res.Repositories)
@@ -243,13 +204,13 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 	if pages > 100 { pages = 100 }
 	for p := 2; p <= pages; p++ {
 		time.Sleep(time.Duration(400 + rand.Intn(500)) * time.Millisecond)
-		resP, c, t := pc.fetchPage(prefix, p, client, token, ua)
-		client, token = c, t
+		resP, c, t, u := pc.fetchPage(prefix, p, client, token, ua)
+		client, token, ua = c, t, u
 		if resP != nil { 
 			pc.processResults(resP.Repositories)
 		} else {
 			pc.updateTaskStatus(prefix, "pending")
-			return false, client, token
+			return false, client, token, ua
 		}
 	}
 
@@ -264,7 +225,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 	}
 	
 	pc.updateTaskStatus(prefix, "done")
-	return true, client, token
+	return true, client, token, ua
 }
 
 func (pc *ParallelCrawler) updateTaskStatus(id, status string) {
@@ -273,7 +234,7 @@ func (pc *ParallelCrawler) updateTaskStatus(id, status string) {
 	_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": status, "finished_at": time.Now()}})
 }
 
-func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token, ua string) (*V2SearchResponse, *http.Client, string) {
+func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client, token, ua string) (*V2SearchResponse, *http.Client, string, string) {
 	for attempts := 0; attempts < 3; attempts++ {
 		url := myutils.GetV2SearchURL(query, page, 100)
 		req, _ := http.NewRequest("GET", url, nil)
@@ -281,48 +242,47 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 
 		resp, err := client.Do(req)
 		if err != nil {
-			myutils.Logger.Error(fmt.Sprintf("Network Error for %q: %v. Refreshing connection...", query, err))
-			newC, newT := pc.IM.GetNextClient()
-			return nil, newC, newT
+			myutils.Logger.Error(fmt.Sprintf("Network Error for %q: %v. Refreshing...", query, err))
+			newC, newT, newUA := pc.IM.GetNextClient()
+			return nil, newC, newT, newUA
 		}
 		
-		// CRITICAL: Always drain and close the body to allow TCP connection reuse (Keep-Alive)
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
 
 		if resp.StatusCode == 401 {
 			myutils.Logger.Warn(fmt.Sprintf("401 Unauthorized for %q. Invalidating token and rotating...", query))
 			pc.IM.ClearToken(token)
-			newC, newT := pc.IM.GetNextClient()
-			return nil, newC, newT
+			newC, newT, newUA := pc.IM.GetNextClient()
+			return nil, newC, newT, newUA
 		}
 
 		if resp.StatusCode == 403 {
-			myutils.Logger.Error(fmt.Sprintf("CRITICAL: 403 Forbidden for %q. High bot score detected. Sleeping 15m...", query))
+			myutils.Logger.Error(fmt.Sprintf("CRITICAL: 403 Forbidden for %q. Sleeping 15m...", query))
 			time.Sleep(15 * time.Minute)
-			newC, newT := pc.IM.GetNextClient()
-			return nil, newC, newT
+			newC, newT, newUA := pc.IM.GetNextClient()
+			return nil, newC, newT, newUA
 		}
 
 		if resp.StatusCode == 429 {
 			myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q. Rotating identity...", query))
 			time.Sleep(15 * time.Second)
-			newC, newT := pc.IM.GetNextClient()
-			return nil, newC, newT
+			newC, newT, newUA := pc.IM.GetNextClient()
+			return nil, newC, newT, newUA
 		}
 
 		if resp.StatusCode != http.StatusOK { 
 			myutils.Logger.Error(fmt.Sprintf("Unexpected Status %d for %q", resp.StatusCode, query))
-			return nil, client, token 
+			return nil, client, token, ua 
 		}
 		
 		var res V2SearchResponse
 		if err := json.Unmarshal(bodyBytes, &res); err != nil { 
-			return nil, client, token 
+			return nil, client, token, ua 
 		}
-		return &res, client, token
+		return &res, client, token, ua
 	}
-	return nil, client, token
+	return nil, client, token, ua
 }
 
 func (pc *ParallelCrawler) processResults(repos []struct {
