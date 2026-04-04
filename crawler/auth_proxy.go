@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
+	"crypto/tls"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
 )
