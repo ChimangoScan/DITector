@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"crypto/tls"
 	"io"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
