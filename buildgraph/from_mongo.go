@@ -112,14 +112,11 @@ const tagConcurrency = 4
 
 func repoWorker(repoChan chan *myutils.Repository, jobChan chan GraphJob, tagCnt int) {
 	for repo := range repoChan {
-		tags, err := myutils.ReqTagsMetadata(repo.Namespace, repo.Name, 1, tagCnt)
-		if err != nil {
+		tags := fetchTags(repo, tagCnt)
+		if len(tags) == 0 {
 			continue
 		}
 
-		// Fetch image manifests for all tags in parallel. Each ReqImagesMetadata
-		// call is an independent HTTPS round-trip; serialising them wastes wall
-		// time proportional to (numTags × latency).
 		sem := make(chan struct{}, tagConcurrency)
 		var wg sync.WaitGroup
 		for _, tag := range tags {
@@ -129,38 +126,10 @@ func repoWorker(repoChan chan *myutils.Repository, jobChan chan GraphJob, tagCnt
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				imgs, err := myutils.ReqImagesMetadata(repo.Namespace, repo.Name, t.Name)
+				imgs, err := fetchImages(repo, t)
 				if err != nil {
 					return
 				}
-
-				// Persist image metadata to MongoDB so Stage III can compute
-				// Neo4j node IDs without live API calls.
-				for _, img := range imgs {
-					if myutils.GlobalDBClient.MongoFlag {
-						if err := myutils.GlobalDBClient.Mongo.UpdateImage(img); err != nil {
-							myutils.Logger.Error(fmt.Sprintf("UpdateImage %s failed: %v", img.Digest, err))
-						}
-					}
-				}
-
-				// Persist tag to MongoDB (with its Images array populated).
-				// Required by calculate_node_dependent_weights loadDataFromMongo.
-				t.Images = make([]myutils.ImageInTag, 0, len(imgs))
-				for _, img := range imgs {
-					t.Images = append(t.Images, myutils.ImageInTag{
-						Architecture: img.Architecture,
-						OS:           img.OS,
-						Digest:       img.Digest,
-						Size:         img.Size,
-					})
-				}
-				if myutils.GlobalDBClient.MongoFlag {
-					if err := myutils.GlobalDBClient.Mongo.UpdateTag(t); err != nil {
-						myutils.Logger.Error(fmt.Sprintf("UpdateTag %s/%s:%s failed: %v", repo.Namespace, repo.Name, t.Name, err))
-					}
-				}
-
 				for _, img := range imgs {
 					if img.OS == "windows" {
 						continue
@@ -177,13 +146,102 @@ func repoWorker(repoChan chan *myutils.Repository, jobChan chan GraphJob, tagCnt
 		}
 		wg.Wait()
 
-		// All tags processed: mark repo as graph-built so it is skipped on restart.
 		if myutils.GlobalDBClient.MongoFlag {
 			if err := myutils.GlobalDBClient.Mongo.MarkRepoGraphBuilt(repo.Namespace, repo.Name); err != nil {
 				myutils.Logger.Error(fmt.Sprintf("MarkRepoGraphBuilt %s/%s failed: %v", repo.Namespace, repo.Name, err))
 			}
 		}
 	}
+}
+
+// fetchTags returns tags from the MongoDB cache when all entries carry image
+// references (i.e. were persisted by a previous run). Falls back to the live
+// Docker Hub API otherwise.
+func fetchTags(repo *myutils.Repository, tagCnt int) []*myutils.Tag {
+	if myutils.GlobalDBClient.MongoFlag {
+		tags, err := myutils.GlobalDBClient.Mongo.FindAllTagsByRepoName(repo.Namespace, repo.Name)
+		if err == nil && allTagsHaveImages(tags) {
+			return tags
+		}
+	}
+	tags, err := myutils.ReqTagsMetadata(repo.Namespace, repo.Name, 1, tagCnt)
+	if err != nil {
+		return nil
+	}
+	return tags
+}
+
+// allTagsHaveImages reports whether every tag carries at least one image
+// reference, which indicates the tag set was previously persisted with full
+// metadata. An empty slice returns false to force an API fetch.
+func allTagsHaveImages(tags []*myutils.Tag) bool {
+	if len(tags) == 0 {
+		return false
+	}
+	for _, t := range tags {
+		if len(t.Images) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// fetchImages returns full image metadata for a tag. It first attempts to
+// reconstruct the image list from MongoDB (cache hit path: zero API calls).
+// On any cache miss it falls back to the live API and persists the result.
+func fetchImages(repo *myutils.Repository, t *myutils.Tag) ([]*myutils.Image, error) {
+	if myutils.GlobalDBClient.MongoFlag && len(t.Images) > 0 {
+		if imgs, ok := loadImagesFromCache(t.Images); ok {
+			return imgs, nil
+		}
+	}
+	return fetchAndPersistImages(repo, t)
+}
+
+// loadImagesFromCache looks up every ImageInTag digest in ImgColl.
+// Returns (imgs, true) only when every document is found with layer data
+// populated — a partial cache is treated as a miss to preserve consistency.
+func loadImagesFromCache(refs []myutils.ImageInTag) ([]*myutils.Image, bool) {
+	imgs := make([]*myutils.Image, 0, len(refs))
+	for _, ref := range refs {
+		img, err := myutils.GlobalDBClient.Mongo.FindImageByDigest(ref.Digest)
+		if err != nil || len(img.Layers) == 0 {
+			return nil, false
+		}
+		imgs = append(imgs, img)
+	}
+	return imgs, true
+}
+
+// fetchAndPersistImages calls the live Docker Hub API for image manifests and
+// writes both the tag document and each image document to MongoDB so that
+// subsequent runs can serve them from cache.
+func fetchAndPersistImages(repo *myutils.Repository, t *myutils.Tag) ([]*myutils.Image, error) {
+	imgs, err := myutils.ReqImagesMetadata(repo.Namespace, repo.Name, t.Name)
+	if err != nil {
+		return nil, err
+	}
+	if !myutils.GlobalDBClient.MongoFlag {
+		return imgs, nil
+	}
+	for _, img := range imgs {
+		if err := myutils.GlobalDBClient.Mongo.UpdateImage(img); err != nil {
+			myutils.Logger.Error(fmt.Sprintf("UpdateImage %s failed: %v", img.Digest, err))
+		}
+	}
+	t.Images = make([]myutils.ImageInTag, 0, len(imgs))
+	for _, img := range imgs {
+		t.Images = append(t.Images, myutils.ImageInTag{
+			Architecture: img.Architecture,
+			OS:           img.OS,
+			Digest:       img.Digest,
+			Size:         img.Size,
+		})
+	}
+	if err := myutils.GlobalDBClient.Mongo.UpdateTag(t); err != nil {
+		myutils.Logger.Error(fmt.Sprintf("UpdateTag %s/%s:%s failed: %v", repo.Namespace, repo.Name, t.Name, err))
+	}
+	return imgs, nil
 }
 
 func buildGraphWorker(jobChan chan GraphJob) {
