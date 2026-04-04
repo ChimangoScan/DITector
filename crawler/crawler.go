@@ -24,12 +24,6 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-var userAgents = []string{
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-}
-
 var pageConcurrency = func() int {
 	if v := os.Getenv("PAGE_CONCURRENCY"); v != "" {
 		var n int
@@ -54,6 +48,7 @@ type ParallelCrawler struct {
 	IM          *IdentityManager
 	seenRepos   sync.Map
 	pending     int32
+	startTime   time.Time
 }
 
 func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
@@ -61,26 +56,26 @@ func NewParallelCrawler(workers int, im *IdentityManager) *ParallelCrawler {
 		WorkerCount: workers,
 		RepoChan:    make(chan *myutils.Repository, 100000),
 		IM:          im,
+		startTime:   time.Now(),
 	}
 }
 
-// PreloadExistingRepos loads all repository names from MongoDB into local RAM cache
 func (pc *ParallelCrawler) PreloadExistingRepos() {
 	if !myutils.GlobalDBClient.MongoFlag { return }
 	
-	myutils.Logger.Info("Pre-loading existing repository names into RAM cache... (this may take a minute)")
+	myutils.Logger.Info(">>> CACHE WARM-UP: Loading existing dataset to RAM...")
 	
 	coll := myutils.GlobalDBClient.Mongo.RepoColl
-	// Only fetch namespace and name to save memory and network
 	projection := bson.M{"namespace": 1, "name": 1, "_id": 0}
 	cursor, err := coll.Find(context.TODO(), bson.M{}, options.Find().SetProjection(projection))
 	if err != nil {
-		myutils.Logger.Error(fmt.Sprintf("Failed to preload repos: %v", err))
+		myutils.Logger.Error(fmt.Sprintf("!!! CRITICAL: Failed to preload repos: %v", err))
 		return
 	}
 	defer cursor.Close(context.TODO())
 
 	count := 0
+	start := time.Now()
 	for cursor.Next(context.TODO()) {
 		var r struct {
 			Namespace string `bson:"namespace"`
@@ -91,11 +86,11 @@ func (pc *ParallelCrawler) PreloadExistingRepos() {
 		fullName := r.Namespace + "/" + r.Name
 		pc.seenRepos.Store(fullName, true)
 		count++
-		if count % 500000 == 0 {
-			myutils.Logger.Info(fmt.Sprintf("Cached %d million repos...", count/1000000))
+		if count % 250000 == 0 {
+			myutils.Logger.Info(fmt.Sprintf("... Preloading: %.1f Million repos in RAM", float64(count)/1000000.0))
 		}
 	}
-	myutils.Logger.Info(fmt.Sprintf("Cache Warm-up Complete: %d repos loaded to RAM", count))
+	myutils.Logger.Info(fmt.Sprintf(">>> WARM-UP COMPLETE: %d repos loaded in %v", count, time.Since(start).Round(time.Second)))
 }
 
 func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
@@ -109,10 +104,10 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 		count := len(buffer)
 		err := myutils.GlobalDBClient.Mongo.BulkUpsertRepositories(buffer)
 		if err != nil {
-			myutils.Logger.Error(fmt.Sprintf("DB ERROR during flush: %v", err))
+			myutils.Logger.Error(fmt.Sprintf("!!! DATABASE ERROR: %v", err))
 			return
 		}
-		myutils.Logger.Info(fmt.Sprintf(">>> DATABASE UPDATE: Flushed %d NEW unique repos", count))
+		myutils.Logger.Info(fmt.Sprintf(">>> DB SYNC: Flushed %d NEW repos to central database", count))
 		buffer = buffer[:0]
 	}
 
@@ -129,10 +124,9 @@ func (pc *ParallelCrawler) repoWriter(ctx context.Context, done chan struct{}) {
 }
 
 func (pc *ParallelCrawler) Start(seeds []string) {
-	// Step 0: Cache Warm-up
 	pc.PreloadExistingRepos()
 
-	myutils.Logger.Info(fmt.Sprintf("Starting Discovery Pipeline [W:%d]", pc.WorkerCount))
+	myutils.Logger.Info(fmt.Sprintf(">>> CORE START: Discovery Pipeline Active [W:%d]", pc.WorkerCount))
 	
 	if len(seeds) == 0 {
 		for _, ch := range alphabet { seeds = append(seeds, string(ch)) }
@@ -151,15 +145,15 @@ func (pc *ParallelCrawler) Start(seeds []string) {
 		for {
 			p := atomic.LoadInt32(&pc.pending)
 			active, _ := myutils.GlobalDBClient.Mongo.KeywordsColl.CountDocuments(context.TODO(), bson.M{"status": "pending"})
-			myutils.Logger.Info(fmt.Sprintf("Status: %d workers active | %d tasks in queue", p, active))
-			time.Sleep(15 * time.Second)
+			myutils.Logger.Info(fmt.Sprintf("--- STATS: %d workers active | %d tasks left | Uptime: %v", p, active, time.Since(pc.startTime).Round(time.Second)))
+			time.Sleep(30 * time.Second)
 		}
 	}()
 
 	pc.WG.Wait()
 	close(pc.RepoChan)
 	<-writerDone
-	myutils.Logger.Info("Discovery Phase Complete")
+	myutils.Logger.Info(">>> PIPELINE HALTED: Discovery Cycle Finished")
 }
 
 func (pc *ParallelCrawler) ensureQueueInitialized(seeds []string) {
@@ -231,7 +225,7 @@ func (pc *ParallelCrawler) getNextTask() string {
 }
 
 func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token, ua string) (bool, *http.Client, string, string) {
-	myutils.Logger.Info(fmt.Sprintf("Processing Prefix: [%s]", prefix))
+	myutils.Logger.Info(fmt.Sprintf("[TASK] Exploring: [%s] | Identity: %s", prefix, ua[0:30]+"..."))
 	
 	res, nextClient, nextToken, nextUA := pc.fetchPage(prefix, 1, client, token, ua)
 	client, token, ua = nextClient, nextToken, nextUA
@@ -240,7 +234,9 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		return false, client, token, ua
 	}
 
-	pc.processResults(res.Repositories)
+	newInPrefix := pc.processResults(res.Repositories)
+	efficiency := (float64(newInPrefix) / 100.0) * 100.0
+	
 	pages := (res.Count / 100) + 1
 	if pages > 100 { pages = 100 }
 	for p := 2; p <= pages; p++ {
@@ -248,7 +244,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		resP, c, t, u := pc.fetchPage(prefix, p, client, token, ua)
 		client, token, ua = c, t, u
 		if resP != nil { 
-			pc.processResults(resP.Repositories)
+			newInPrefix += pc.processResults(resP.Repositories)
 		} else {
 			pc.updateTaskStatus(prefix, "pending")
 			return false, client, token, ua
@@ -265,6 +261,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.BulkWrite(ctx, models)
 	}
 	
+	myutils.Logger.Info(fmt.Sprintf("[DONE] Prefix [%s]: +%d unique | Eff: %.1f%% | Found total: %d", prefix, newInPrefix, efficiency, res.Count))
 	pc.updateTaskStatus(prefix, "done")
 	return true, client, token, ua
 }
@@ -283,7 +280,7 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 
 		resp, err := client.Do(req)
 		if err != nil {
-			myutils.Logger.Error(fmt.Sprintf("Network Error for %q: %v. Refreshing...", query, err))
+			myutils.Logger.Error(fmt.Sprintf("!!! NET ERROR [%s]: %v", query, err))
 			newC, newT, newUA := pc.IM.GetNextClient()
 			return nil, newC, newT, newUA
 		}
@@ -292,28 +289,27 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 		bodyBytes, _ := io.ReadAll(resp.Body)
 
 		if resp.StatusCode == 401 {
-			myutils.Logger.Warn(fmt.Sprintf("401 Unauthorized for %q. Invalidating token and rotating...", query))
+			myutils.Logger.Warn(fmt.Sprintf("!!! 401 Unauthorized [%s]. Rotating...", query))
 			pc.IM.ClearToken(token)
 			newC, newT, newUA := pc.IM.GetNextClient()
 			return nil, newC, newT, newUA
 		}
 
 		if resp.StatusCode == 403 {
-			myutils.Logger.Error(fmt.Sprintf("CRITICAL: 403 Forbidden for %q. Sleeping 15m...", query))
+			myutils.Logger.Error(fmt.Sprintf("!!! CRITICAL 403 Forbidden [%s]. Bot block detected. Sleeping 15m...", query))
 			time.Sleep(15 * time.Minute)
 			newC, newT, newUA := pc.IM.GetNextClient()
 			return nil, newC, newT, newUA
 		}
 
 		if resp.StatusCode == 429 {
-			myutils.Logger.Warn(fmt.Sprintf("429 Rate Limit for %q. Rotating identity...", query))
+			myutils.Logger.Warn(fmt.Sprintf("!!! 429 Rate Limit [%s]. Rotating identity...", query))
 			time.Sleep(15 * time.Second)
 			newC, newT, newUA := pc.IM.GetNextClient()
 			return nil, newC, newT, newUA
 		}
 
 		if resp.StatusCode != http.StatusOK { 
-			myutils.Logger.Error(fmt.Sprintf("Unexpected Status %d for %q", resp.StatusCode, query))
 			return nil, client, token, ua 
 		}
 		
@@ -329,17 +325,19 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 func (pc *ParallelCrawler) processResults(repos []struct {
 	RepoName  string "json:\"repo_name\""
 	PullCount int64  "json:\"pull_count\""
-}) {
+}) int {
+	newCount := 0
 	for _, r := range repos {
 		if r.RepoName == "" { continue }
 		if _, seen := pc.seenRepos.LoadOrStore(r.RepoName, true); seen { continue }
 		ns, name := parseRepoName(r.RepoName)
 		select {
 		case pc.RepoChan <- &myutils.Repository{Namespace: ns, Name: name, PullCount: r.PullCount}:
+			newCount++
 		default:
-			myutils.Logger.Warn("RepoChan FULL! Data may be delayed.")
 		}
 	}
+	return newCount
 }
 
 type V2SearchResponse struct {
