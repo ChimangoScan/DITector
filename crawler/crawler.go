@@ -308,8 +308,8 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 			client, token, ua = pc.IM.GetNextClient()
 			continue
 		default:
-			myutils.Logger.Warn(fmt.Sprintf("!!! HTTP %d [%s]. Cooling off 30s...", resp.StatusCode, query))
-			time.Sleep(30 * time.Second)
+			myutils.Logger.Warn(fmt.Sprintf("!!! HTTP %d [%s]. Cooling off 4m...", resp.StatusCode, query))
+			time.Sleep(4 * time.Minute)
 			return nil, client, token, ua
 		}
 	}
