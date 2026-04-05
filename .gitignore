@@ -25,3 +25,7 @@ ditector
 accounts*.json
 docker-scan
 mongo_data_secure/
+
+# Arquivos operacionais internos — nunca commitar
+RUNBOOK.txt
+a9_sudo_commands.txt
