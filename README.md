@@ -43,44 +43,49 @@ A base científica é o paper **"Dr. Docker: A Large-Scale Security Measurement 
 │                        DITector Research Pipeline                        │
 └──────────────────────────────────────────────────────────────────────────┘
 
-  ┌──────────────┐     ┌──────────────────┐     ┌──────────────────────┐
-  │  Docker Hub  │────▶│   Stage I        │────▶│     MongoDB          │
-  │  V2 API      │     │   CRAWL          │     │  (repositories_data) │
-  │  /v2/search/ │     │  (DFS + Workers) │     │  namespace, name,    │
-  └──────────────┘     └──────────────────┘     │  pull_count          │
-                                                 └──────────┬───────────┘
-                                                            │
-                                                 ┌──────────▼───────────┐
-  ┌──────────────┐     ┌──────────────────┐     │     Stage II         │
-  │  Docker Hub  │────▶│  Tag/Layer API   │────▶│     BUILD            │
-  │  Tag+Image   │     │  (live API calls │     │  Network heuristic   │
-  │  Metadata    │     │   during build)  │     │  filter + Neo4j IDEA │
-  └──────────────┘     └──────────────────┘     └──────────┬───────────┘
-                                                            │
-                                                 ┌──────────▼───────────┐
-                                                 │     Neo4j            │
-                                                 │  (Layer IDEA graph)  │
-                                                 │  IS_BASE_OF edges    │
-                                                 └──────────┬───────────┘
-                                                            │
-                                                 ┌──────────▼───────────┐
-                                                 │     Stage III        │
-                                                 │     RANK             │
-                                                 │  Dependency Weight   │
-                                                 │  + Pull Count sort   │
-                                                 └──────────┬───────────┘
-                                                            │
-                                                 ┌──────────▼───────────┐
-                                                 │  final_prioritized_  │
-                                                 │  dataset.json        │
-                                                 │  (JSONL, one record  │
-                                                 │   per image)         │
-                                                 └──────────┬───────────┘
-                                                            │
-                                                 ┌──────────▼───────────┐
-                                                 │  OpenVAS Scanning    │
-                                                 │  (seu script externo)│
-                                                 └──────────────────────┘
+  NÓ 1 / NÓ 2 (Crawlers)              NÓ 1 (Bancos de Dados)
+  ┌──────────────────┐                 ┌──────────────────────┐
+  │  Docker Hub      │                 │     MongoDB          │
+  │  V2 API          │────────────────▶│  (repositories_data) │
+  │  /v2/search/     │                 │  namespace, name,    │
+  │  Stage I: CRAWL  │                 │  pull_count          │
+  │  (DFS + Workers) │                 └──────────┬───────────┘
+  └──────────────────┘                            │
+                                                  │
+  NÓ 3 (Builder)                                  │
+  ┌──────────────────┐                 ┌──────────▼───────────┐
+  │  Docker Hub      │                 │     Stage II         │
+  │  Tag+Image API   │────────────────▶│     BUILD            │
+  │  (JWT authn,     │                 │  Claim atômico +     │
+  │   HubClient,     │                 │  HubClient + cache   │
+  │   cache MongoDB) │                 │  + Neo4j IDEA        │
+  └──────────────────┘                 └──────────┬───────────┘
+                                                  │
+                                       ┌──────────▼───────────┐
+                                       │     Neo4j            │
+                                       │  (Layer IDEA graph)  │
+                                       │  IS_BASE_OF edges    │
+                                       │  ./neo4j_data/       │
+                                       └──────────┬───────────┘
+                                                  │
+                                       ┌──────────▼───────────┐
+                                       │     Stage III        │
+                                       │     RANK             │
+                                       │  Dependency Weight   │
+                                       │  + Pull Count sort   │
+                                       └──────────┬───────────┘
+                                                  │
+                                       ┌──────────▼───────────┐
+                                       │  final_prioritized_  │
+                                       │  dataset.json        │
+                                       │  (JSONL, one record  │
+                                       │   per image)         │
+                                       └──────────┬───────────┘
+                                                  │
+                                       ┌──────────▼───────────┐
+                                       │  OpenVAS Scanning    │
+                                       │  (seu script externo)│
+                                       └──────────────────────┘
 ```
 
 ---
@@ -210,55 +215,86 @@ A tarefa nunca é descartada: em qualquer falha, `processTask` chama `updateTask
 
 ### 4.2 Novo arquivo `buildgraph/from_mongo.go`
 
-Reengenharia do estágio `build` original para operar em **Worker Pool paralelo** com três estágios em pipeline:
+Reengenharia completa do estágio `build` para operação distribuída com claim atômico MongoDB:
 
 ```
-MongoDB (repositories)
+ClaimNextBuildRepo (por goroutine — FindOneAndUpdate atômico)
     │
-    ▼ loadReposToChannel (goroutine única, paginação)
+    ▼ repoWorker × max(NumCPU*8, 32)   ← I/O bound: espera de rede
+    │   (HubClient autenticado por goroutine)
+    │   (cache MongoDB → fallback API para tags e imagens)
+    │   (defer MarkRepoGraphBuilt — sempre executado)
+    ▼
+jobChan
     │
-    ├──▶ repoChan (buffer 4000)
-    │         │
-    │         ▼
-    ├──▶ repoWorker × max(NumCPU*16, 64)   ← I/O bound: espera de rede
-    │         │ (API Docker Hub: tags + manifests + filtro de rede)
-    │         ▼
-    │    jobChan (buffer 20000)
-    │         │
-    └──▶ buildGraphWorker × max(NumCPU*4, 16)  ← DB bound: escrita Neo4j
-              │
-              ▼
-           Neo4j + MongoDB (MarkRepoGraphBuilt → graph_built_at)
+    ▼ graphWorker × max(NumCPU*2, 8)   ← DB bound: escrita Neo4j
+    │
+    ▼
+Neo4j (grafo IDEA) + MongoDB (graph_built_at)
+
+checkpointWriter (goroutine single-writer)
+    ▼
+dataDir/build_checkpoint.jsonl
 ```
 
-**Checkpointing Stage II:** após inserir todas as tags de um repositório no Neo4j, `repoWorker` chama `MarkRepoGraphBuilt`, que grava `graph_built_at` no documento MongoDB. O loader ignora repositórios com esse campo em reinícios subsequentes — zero retrabalho.
+**Claim atômico:** cada `repoWorker` usa `ClaimNextBuildRepo` em vez de cursor compartilhado, habilitando execução distribuída em múltiplas máquinas. `ResetStaleBuildClaims` no startup libera claims órfãos de runs anteriores.
+
+**Checkpointing:** `defer MarkRepoGraphBuilt` em `processRepo` garante que `graph_built_at` seja gravado para todos os repositórios processados, inclusive aqueles sem tags disponíveis — eliminando o reprocessamento infinito de repositórios vazios.
 
 ### 4.3 Modificação em `myutils/urls.go`
 
-Adicionado template e função para a V2 Search API:
+Template e função para a V2 Search API:
 
 ```go
-V2SearchURLTemplate = `https://hub.docker.com/v2/search/repositories/?query=%s&page=%d&page_size=%d&ordering=-pull_count`
+V2SearchURLTemplate = `https://hub.docker.com/v2/search/repositories/?query=%s&page=%d&page_size=%d`
 
 func GetV2SearchURL(query string, page, size int) string
 ```
 
-O parâmetro `ordering=-pull_count` garante que a janela de 10.000 resultados seja determinística e ordenada por popularidade, não aleatória — crítico para consistência entre páginas durante o DFS.
+O parâmetro `ordering=-pull_count` foi removido. O Docker Hub utiliza `best_match` como modo padrão de ordenação, que prioriza correspondências exatas de prefixo antes de resultados por popularidade. Para o DFS por prefixo, `best_match` é semanticamente superior: `query="ngin"` retorna `nginx` antes de repositórios que apenas mencionam "nginx" em descrições, maximizando a relevância dos resultados coletados em cada nó da árvore DFS.
+
+A consistência entre páginas é garantida pelo índice único MongoDB em `{namespace, name}`, não pela ordem de chegada.
 
 O upstream declarava o subcomando `crawl` como stub sem implementação e não utilizava nenhuma API de busca.
 
-### 4.4 Modificações em `myutils/mongo.go`
+### 4.4 Novo arquivo `myutils/hubclient.go`
 
-Adicionadas ao cliente MongoDB para suportar o crawler de alta vazão:
+`HubClient` é o cliente HTTP autenticado compartilhado pelos Estágios I e II, eliminando duplicação de código:
+
+- **Interface `IdentityProvider`** — abstração sobre `IdentityManager`; permite que `myutils` não dependa de `crawler`
+- **`NewHubClient(ip IdentityProvider) *HubClient`** — uma instância por goroutine
+- **`Get(url)`** — 3 tentativas com rotação em 401/429/403; headers Chrome 145 injetados automaticamente
+- **`GetInto(url, dest)`** — `Get` + unmarshal JSON
+- **`GetTags(ns, name, pageNum, size)`** — busca paginada de tags autenticada
+- **`GetImages(ns, name, tag)`** — busca de manifests de imagem autenticada
+- **`setHeaders(req)`** — injeta `Accept-Language: pt-BR,pt;q=0.9,...`, `Referer: https://hub.docker.com/`, `Sec-Fetch-*`
+- **`rotate()`** — troca identidade internamente via `IdentityProvider`
+
+### 4.5 Novo arquivo `buildgraph/metrics.go`
+
+`BuildMetrics` fornece rastreamento de progresso em tempo real para o Estágio II:
+
+- Contadores atômicos para `Processed`, cache hits/misses de tags e imagens, inserções Neo4j, erros
+- `newBuildMetrics(threshold)` captura o total de repositórios pendentes no momento do startup
+- `startReporter(dataDir, done)` loga e persiste em `build_metrics.log` a cada 60s
+- ETA calculado após 30s: `taxa = processed/elapsed_min`, `ETA = (total−processed)/taxa`
+
+### 4.6 Modificações em `myutils/mongo.go`
+
+Adicionadas ao cliente MongoDB para suportar o crawler de alta vazão e o Estágio II distribuído:
 
 - **`BulkUpsertRepositories(repos []*Repository)`** — bulk write atômico e não-ordenado; ~10-50× mais rápido que upserts individuais em loop para processar uma página de resultados inteira de uma vez
 - **`KeywordsColl`** — nova coleção `crawler_keywords` para checkpointing do Estágio I: ao reiniciar, keywords já completamente crawleadas são ignoradas em O(1)
-- **`IsKeywordCrawled(keyword)` / `MarkKeywordCrawled(keyword)`** — interface de leitura/gravação do checkpoint
-- **`MarkRepoGraphBuilt(namespace, name)`** — grava `graph_built_at` no repositório após Estágio II concluído
+- **`IsKeywordCrawled(keyword)` / `MarkKeywordCrawled(keyword)`** — interface de leitura/gravação do checkpoint do Estágio I
+- **`MarkRepoGraphBuilt(namespace, name)`** — grava `graph_built_at` e remove `build_claimed`/`build_started_at` (checkpoint Stage II)
+- **`ClaimNextBuildRepo(threshold)`** — `FindOneAndUpdate` atômico para claim de repositório no Stage II
+- **`ResetStaleBuildClaims()`** — libera claims órfãos no startup do Stage II
+- **`CountPendingBuildRepos(threshold)`** — verifica fila vazia para immortal worker pattern
+- **`FindImagesByDigests(digests)`** — query em lote com `$in`; substitui N queries individuais
 - **Connection pool**: `SetMaxPoolSize(100)`, `SetMinPoolSize(5)`, `SetMaxConnIdleTime(5m)` — estabilidade sob carga paralela alta
 - **Timeout do ping inicial**: aumentado de `1s` para `30s` — evita falso-negativo em conexões lentas
 
-### 4.5 Modificações em `myutils/neo4j.go`
+### 4.7 Modificações em `myutils/neo4j.go`
 
 `InsertImageToNeo4j` foi reescrito para **transação única por imagem** (antes: uma transação por layer):
 
@@ -269,7 +305,7 @@ Resultado: latência de inserção cai de O(N layers × RTT) para O(1 × RTT).
 
 **Correção em `findLayerNodesByRawLayerDigestFunc`:** a query original usava `{id: $digest}` para matchar um nó `RawLayer`, mas a propriedade armazenada é `digest`. Corrigido para `{digest: $digest}`. O bug quebrava silenciosamente o rastreamento de imagens upstream.
 
-### 4.6 Modificações em `myutils/docker_hub_api_requests.go`
+### 4.8 Modificações em `myutils/docker_hub_api_requests.go`
 
 O cliente HTTP global foi reestruturado:
 
@@ -277,13 +313,13 @@ O cliente HTTP global foi reestruturado:
 - **Connection pool**: `MaxIdleConns: 300`, `MaxIdleConnsPerHost: 50`, `IdleConnTimeout: 90s`
 - **`Timeout: 30s`** adicionado ao cliente global
 
-### 4.7 Modificações em `myutils/config.go`
+### 4.9 Modificações em `myutils/config.go`
 
 - **Env vars de override**: `MONGO_URI` e `NEO4J_URI` sobrescrevem os valores do `config.yaml` — permite rodar Node 2 apontando para o MongoDB do Node 1 sem alterar o arquivo de configuração
 - **Localização do config**: `filepath.Dir(os.Args[0])` → `os.Getwd()` — o config é buscado relativo ao diretório de trabalho, não ao binário (compatível com `go run`)
 - **Neo4j opcional**: se a conexão Neo4j falhar na inicialização, o sistema não aborta — útil para rodar apenas o Estágio I sem Neo4j ativo
 
-### 4.8 Novo `docker-compose.yml`
+### 4.10 Infraestrutura Docker Compose
 
 Infraestrutura completa para rodar a pipeline:
 
@@ -299,11 +335,18 @@ SEED=a docker compose up -d crawler   # Máquina 1: a-m
 SEED=n docker compose up -d crawler   # Máquina 2: n-z
 ```
 
-### 4.9 Modificação em `scripts/calculate_node_dependent_weights.go`
+`docker-compose.node3.yml` define o serviço `builder` para o Nó 3 (Stage II):
+```bash
+DB_HOST=<IP_NÓ_1> NEO4J_URI=neo4j://<IP_NÓ_1>:7687 make start-build
+```
+
+O volume do Neo4j foi migrado de named Docker volume para host path `./neo4j_data:/data`, protegendo dados contra `docker system prune -a --volumes`.
+
+### 4.11 Modificação em `scripts/calculate_node_dependent_weights.go`
 
 O branch `if repoDoc.Namespace == "library"` continha `continue` como primeira instrução, tornando todo o código abaixo inalcançável. Imagens oficiais Docker (`library/`) eram silenciosamente ignoradas no cálculo de dependency weight. O `continue` foi removido.
 
-### 4.10 Novos scripts de automação (`automation/`)
+### 4.12 Novos scripts de automação (`automation/`)
 
 - `pipeline_autopilot.sh` — executa os 3 estágios sequencialmente com configuração parametrizada
 - `test_e2e.sh` — teste de integração end-to-end: crawl com seed `nginx`, build, rank, verifica output
@@ -530,21 +573,36 @@ Com 1 máquina e 20 workers rodando por 24h, espera-se descobrir entre 500.000 e
 
 ### O que faz
 
-Para cada repositório no MongoDB com `pull_count >= threshold`:
+Para cada repositório no MongoDB com `pull_count >= threshold`, o Estágio II:
 
-1. Chama a API Docker Hub para buscar as N tags mais recentes do repositório
-2. Para cada tag, busca os metadados de imagem (layers: digest, instruction, size)
-3. Filtra imagens Windows
-4. Insere no **Neo4j** o grafo IDEA com o algoritmo de hashing das seções 3.2
+1. Reivindica atomicamente o repositório via `ClaimNextBuildRepo` (MongoDB `FindOneAndUpdate`), garantindo que nenhum outro worker o processe simultaneamente
+2. Consulta o cache MongoDB de tags; recorre à API Docker Hub com autenticação JWT (HubClient) apenas quando o cache não contém o dado
+3. Para cada tag, consulta o cache MongoDB de imagens; acessa a API para obter layers (digest, instruction, size) quando necessário
+4. Filtra imagens Windows
+5. Insere no Neo4j o grafo IDEA com o algoritmo de hashing de layer IDs (seção 3.2 do paper)
+6. Marca o repositório como concluído via `MarkRepoGraphBuilt` (campo `graph_built_at`) — executado via `defer`, portanto garantido inclusive para repositórios com 0 tags
+
+O Stage II pode ser executado em múltiplas máquinas simultaneamente. O claim atômico elimina reprocessamento duplicado sem nenhuma coordenação adicional entre nós.
 
 ### Como executar
 
+**Via Makefile (Nó 3 — recomendado):**
+```bash
+# Configurar variáveis e iniciar o container builder
+DB_HOST=<IP_NÓ_1> NEO4J_URI=neo4j://<IP_NÓ_1>:7687 make start-build
+
+# Acompanhar logs
+make logs-build
+```
+
+**Via linha de comando (desenvolvimento / teste local):**
 ```bash
 go run main.go build \
   --format mongo \
   --threshold 1000 \
-  --page_size 50 \
   --tags 3 \
+  --accounts accounts.json \
+  --data_dir /tmp/ditector_build \
   --config config.yaml
 ```
 
@@ -552,26 +610,45 @@ go run main.go build \
 
 | Flag | Padrão | Descrição |
 |------|--------|-----------|
-| `--format` | `mongo` | Fonte de dados (só `mongo` suportado atualmente) |
+| `--format` | `mongo` | Fonte de dados (somente `mongo` suportado) |
 | `--threshold` | 1.000.000 | Pull count mínimo para processar um repositório |
-| `--page` | 1 | Página inicial para retomar processamento interrompido |
-| `--page_size` | 5 | Repositórios processados por lote (página MongoDB) |
 | `--tags` | 10 | Número de tags mais recentes a processar por repositório |
+| `--accounts` | — | Caminho para `accounts.json` (autenticação JWT — mesmo arquivo do Estágio I) |
+| `--proxies` | — | Caminho para arquivo de proxies (opcional) |
+| `--data_dir` | `.` | Diretório para `build_checkpoint.jsonl` e `build_metrics.log` |
+
+Os parâmetros `--page` e `--page_size` foram removidos: o controle de progresso é gerenciado pelo campo `graph_built_at` no MongoDB (via claim atômico), não por paginação manual.
 
 **Recomendações para pesquisa:**
-- `--threshold 1000` — cobre a maior parte dos repos com atividade real
-- `--tags 3` — as 3 tags mais recentes são suficientes para detecção (alinhado com o paper)
-- `--page_size 50` — tamanho de lote adequado para a maioria das máquinas
+- `--threshold 1000` — cobre a maior parte dos repositórios com atividade real
+- `--tags 3` — alinhado com o paper Dr. Docker; as 3 tags mais recentes são suficientes para análise de herança
 
-### Verificar progresso
+### Monitoramento do progresso
 
 ```bash
+# Métricas com ETA em tempo real
+tail -f build_metrics.log
+
+# Exemplo de linha de métricas:
+# [METRICS 02:15:00] progresso=1234/48000 (2.6%) | taxa=45.2 repos/min | ETA=17h22m | cache tags=82% imgs=71% | neo4j=12340 | erros=3 | uptime=27m18s
+
+# Repositórios concluídos (linhas no checkpoint)
+wc -l build_checkpoint.jsonl
+
+# Contagem direta no MongoDB
+mongosh <MONGO_URI>/dockerhub_data --eval \
+  'db.repositories_data.countDocuments({graph_built_at: {$exists: true}})'
+
 # Nodes no Neo4j
 cypher-shell -u neo4j -p "" "MATCH (l:Layer) RETURN count(l) AS total_layers"
 
 # Edges no Neo4j
 cypher-shell -u neo4j -p "" "MATCH ()-[r:IS_BASE_OF]->() RETURN count(r) AS total_edges"
 ```
+
+### Persistência dos dados Neo4j
+
+O Neo4j persiste em `./neo4j_data/` (host path explícito). Essa pasta é criada automaticamente pelo Docker Compose no primeiro start. Ao contrário de named Docker volumes, ela não é afetada por `docker system prune -a --volumes`. Inclua `neo4j_data/` nos seus backups regulares junto com `mongo_data_secure/`.
 
 ---
 
