@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"crypto/tls"
 	"io"
 
 	"github.com/NSSL-SJTU/DITector/myutils"
@@ -218,7 +217,7 @@ func (pc *ParallelCrawler) getNextTask() string {
 		ctx,
 		bson.M{"status": "pending"},
 		bson.M{"$set": bson.M{"status": "processing", "started_at": time.Now()}},
-		options.FindOneAndUpdate().SetReturnDocument(options.After).SetSort(bson.M{"finished_at": 1}),
+		options.FindOneAndUpdate().SetReturnDocument(options.After).SetSort(bson.D{{Key: "priority", Value: -1}, {Key: "_id", Value: 1}}),
 	).Decode(&doc)
 	if err != nil { return "" }
 	return doc.ID
@@ -247,9 +246,14 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		}
 	}
 	if (res.Count >= 10000 || len(prefix) == 1) && len(prefix) < 255 {
+		priority := 0
+		if newInPrefix > 0 { priority = 1 }
 		var models []mongo.WriteModel
 		for _, char := range alphabet {
-			models = append(models, mongo.NewUpdateOneModel().SetFilter(bson.M{"_id": prefix + string(char)}).SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending"}}).SetUpsert(true))
+			models = append(models, mongo.NewUpdateOneModel().
+				SetFilter(bson.M{"_id": prefix + string(char)}).
+				SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending", "priority": priority}}).
+				SetUpsert(true))
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
