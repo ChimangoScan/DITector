@@ -200,8 +200,8 @@ func (pc *ParallelCrawler) worker(id int) {
 		prefix := pc.getNextTask()
 		if prefix == "" { break }
 		atomic.AddInt32(&pc.pending, 1)
-		success, nextClient, nextToken, _ := pc.processTask(prefix, client, token, myUA)
-		client, token = nextClient, nextToken
+		success, nextClient, nextToken, nextUA := pc.processTask(prefix, client, token, myUA)
+		client, token, myUA = nextClient, nextToken, nextUA
 		atomic.AddInt32(&pc.pending, -1)
 		if !success { time.Sleep(5 * time.Second) }
 		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
@@ -224,7 +224,9 @@ func (pc *ParallelCrawler) getNextTask() string {
 }
 
 func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token, ua string) (bool, *http.Client, string, string) {
-	myutils.Logger.Info(fmt.Sprintf("[TASK] Exploring: [%s]", prefix))
+	uaPreview := ua
+	if len(uaPreview) > 30 { uaPreview = uaPreview[:30] }
+	myutils.Logger.Info(fmt.Sprintf("[TASK] Exploring: [%s] | Identity: %s...", prefix, uaPreview))
 	res, nextClient, nextToken, nextUA := pc.fetchPage(prefix, 1, client, token, ua)
 	client, token, ua = nextClient, nextToken, nextUA
 	if res == nil {
@@ -260,7 +262,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		_, _ = myutils.GlobalDBClient.Mongo.KeywordsColl.BulkWrite(ctx, models)
 	}
 	efficiency := (float64(newInPrefix) / float64(pages*100)) * 100.0
-	myutils.Logger.Info(fmt.Sprintf("[DONE] Prefix [%s]: +%d unique | Eff: %.1f%%", prefix, newInPrefix, efficiency))
+	myutils.Logger.Info(fmt.Sprintf("[DONE] Prefix [%s]: +%d unique | Eff: %.1f%% | Found total: %d", prefix, newInPrefix, efficiency, res.Count))
 	pc.updateTaskStatus(prefix, "done")
 	return true, client, token, ua
 }
@@ -278,39 +280,35 @@ func (pc *ParallelCrawler) fetchPage(query string, page int, client *http.Client
 		pc.setBrowserHeaders(req, token, ua)
 		resp, err := client.Do(req)
 		if err != nil {
-			myutils.Logger.Error(fmt.Sprintf("!!! NET ERROR [%s]: %v. Refreshing...", query, err))
-			newC, newT, newUA := pc.IM.GetNextClient()
-			return nil, newC, newT, newUA
+			myutils.Logger.Error(fmt.Sprintf("!!! NET ERROR [%s]: %v. Rotating...", query, err))
+			client, token, ua = pc.IM.GetNextClient()
+			continue
 		}
-		
-		// Log Rate Limit info for transparency
-		remaining := resp.Header.Get("x-ratelimit-remaining")
-		if remaining != "" && rand.Intn(10) == 0 { // Log 10% of the time to avoid bloat
-			myutils.Logger.Info(fmt.Sprintf("Rate Limit Remaining: %s", remaining))
-		}
-
-		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode == 401 {
+		resp.Body.Close()
+		switch resp.StatusCode {
+		case http.StatusOK:
+			var res V2SearchResponse
+			if err := json.Unmarshal(bodyBytes, &res); err != nil { return nil, client, token, ua }
+			return &res, client, token, ua
+		case 401:
+			myutils.Logger.Warn(fmt.Sprintf("!!! 401 [%s]. Rotating account...", query))
 			pc.IM.ClearToken(token)
-			newC, newT, newUA := pc.IM.GetNextClient()
-			return nil, newC, newT, newUA
-		}
-		if resp.StatusCode == 403 {
-			myutils.Logger.Error(fmt.Sprintf("!!! CRITICAL 403 Forbidden [%s]. Bot block detected. Sleeping 15m...", query))
-			time.Sleep(15 * time.Minute)
-			newC, newT, newUA := pc.IM.GetNextClient()
-			return nil, newC, newT, newUA
-		}
-		if resp.StatusCode == 429 {
+			client, token, ua = pc.IM.GetNextClient()
+			continue
+		case 429:
+			myutils.Logger.Warn(fmt.Sprintf("!!! 429 [%s]. Rate limit, rotating...", query))
 			time.Sleep(15 * time.Second)
-			newC, newT, newUA := pc.IM.GetNextClient()
-			return nil, newC, newT, newUA
+			client, token, ua = pc.IM.GetNextClient()
+			continue
+		case 403:
+			myutils.Logger.Error(fmt.Sprintf("!!! 403 [%s]. Bot block detected, rotating...", query))
+			client, token, ua = pc.IM.GetNextClient()
+			continue
+		default:
+			myutils.Logger.Error(fmt.Sprintf("!!! HTTP %d [%s].", resp.StatusCode, query))
+			return nil, client, token, ua
 		}
-		if resp.StatusCode != http.StatusOK { return nil, client, token, ua }
-		var res V2SearchResponse
-		if err := json.Unmarshal(bodyBytes, &res); err != nil { return nil, client, token, ua }
-		return &res, client, token, ua
 	}
 	return nil, client, token, ua
 }
