@@ -117,15 +117,20 @@ var calculateCmd = &cobra.Command{
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
-	Short: "read data from crawl results, store metadata to MongoDB, and build dependency graph with Neo4j",
+	Short: "fetch tag/image metadata and build Neo4j dependency graph from crawled repos",
 	Run: func(cmd *cobra.Command, args []string) {
 		format, _ := cmd.Flags().GetString("format")
-		page, _ := cmd.Flags().GetInt64("page")
-		pageSize, _ := cmd.Flags().GetInt64("page_size")
 		tagCnt, _ := cmd.Flags().GetInt("tags")
-		pullCountThreshold, _ := cmd.Flags().GetInt64("threshold")
-		fmt.Printf("%s Start to build, format: %s, page: %d, page_size:%d, tags: %d, threshold: %d\n", myutils.GetLocalNowTimeStr(), format, page, pageSize, tagCnt, pullCountThreshold)
-		buildgraph.Build(format, page, pageSize, tagCnt, pullCountThreshold)
+		threshold, _ := cmd.Flags().GetInt64("threshold")
+		proxyFile, _ := cmd.Flags().GetString("proxies")
+		accountFile, _ := cmd.Flags().GetString("accounts")
+		dataDir, _ := cmd.Flags().GetString("data_dir")
+
+		im, err := crawler.LoadIdentities(proxyFile, accountFile)
+		if err != nil {
+			log.Fatalf("Failed to load identities: %v", err)
+		}
+		buildgraph.Build(format, tagCnt, threshold, im, dataDir)
 	},
 }
 
@@ -268,11 +273,12 @@ func init() {
 	calculateCmd.Flags().String("digest", "", "digest of the image to calculate the node id in Neo4j")
 
 	// buildCmd
-	buildCmd.Flags().String("format", "mongo", "format of the source data, including: json, mongo")
-	buildCmd.Flags().Int64("page", 1, "start page for building from mongo")
-	buildCmd.Flags().Int64("page_size", 5, "start page_size of mongo")
-	buildCmd.Flags().Int("tags", 10, "page size of each tag metadata API for custom repo")
-	buildCmd.Flags().Int64("threshold", 1000000, "threshold of pull_count for getting all tags from API")
+	buildCmd.Flags().String("format", "mongo", "source format: mongo")
+	buildCmd.Flags().Int("tags", 10, "number of tags to fetch per repo")
+	buildCmd.Flags().Int64("threshold", 1000000, "minimum pull_count to include a repo")
+	buildCmd.Flags().String("proxies", "", "path to proxies file (one per line)")
+	buildCmd.Flags().String("accounts", "", "path to accounts JSON file")
+	buildCmd.Flags().String("data_dir", ".", "directory for build_checkpoint.jsonl (use a host-mounted path)")
 
 	// analyzeCmd
 	analyzeCmd.Flags().Bool("partial", false, "only analyze metadata of the Docker image")
