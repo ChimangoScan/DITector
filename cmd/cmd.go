@@ -122,6 +122,7 @@ var buildCmd = &cobra.Command{
 		format, _ := cmd.Flags().GetString("format")
 		tagCnt, _ := cmd.Flags().GetInt("tags")
 		threshold, _ := cmd.Flags().GetInt64("threshold")
+		workers, _ := cmd.Flags().GetInt("workers")
 		proxyFile, _ := cmd.Flags().GetString("proxies")
 		accountFile, _ := cmd.Flags().GetString("accounts")
 		dataDir, _ := cmd.Flags().GetString("data_dir")
@@ -130,7 +131,7 @@ var buildCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Failed to load identities: %v", err)
 		}
-		buildgraph.Build(format, tagCnt, threshold, im, dataDir)
+		buildgraph.Build(format, tagCnt, threshold, workers, im, dataDir)
 	},
 }
 
@@ -274,6 +275,7 @@ func init() {
 
 	// buildCmd
 	buildCmd.Flags().String("format", "mongo", "source format: mongo")
+	buildCmd.Flags().IntP("workers", "w", 5, "number of parallel repo workers (default 5; 0 = auto NumCPU×2 min 8)")
 	buildCmd.Flags().Int("tags", 10, "number of tags to fetch per repo")
 	buildCmd.Flags().Int64("threshold", 0, "minimum pull_count to include a repo (0 = all repos, ordered by pull_count DESC)")
 	buildCmd.Flags().String("proxies", "", "path to proxies file (one per line)")

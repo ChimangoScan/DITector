@@ -164,6 +164,35 @@ func (m *MyMongo) createRepoCollIndexes() (err error) {
 		}
 	}
 
+	// Stage II queue index: sort by pull_count DESC, filter unbuilt repos.
+	// Without this index ClaimNextBuildRepo does a full collection scan on
+	// millions of documents and times out.
+	stageIIModel := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "pull_count", Value: -1},
+		},
+		Options: options.Index().SetName("pull_count_desc"),
+	}
+	_, err = indexView.CreateOne(context.Background(), stageIIModel)
+	if err != nil && !mongo.IsDuplicateKeyError(err) {
+		return
+	}
+
+	// Sparse compound index used by CountPendingBuildRepos and the Stage II
+	// worker loop. Only indexes documents that still have no graph_built_at,
+	// so the index shrinks as repos are processed.
+	stageIIQueueModel := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "graph_built_at", Value: 1},
+			{Key: "pull_count", Value: -1},
+		},
+		Options: options.Index().SetName("stage2_queue").SetSparse(true),
+	}
+	_, err = indexView.CreateOne(context.Background(), stageIIQueueModel)
+	if err != nil && !mongo.IsDuplicateKeyError(err) {
+		return
+	}
+
 	// 报错为重复建立索引，将返回值置空
 	if mongo.IsDuplicateKeyError(err) {
 		err = nil

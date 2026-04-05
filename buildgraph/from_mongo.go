@@ -37,7 +37,7 @@ type cpEntry struct {
 // Progress is checkpointed to dataDir/build_checkpoint.jsonl (host-mounted path)
 // so it survives container restarts independently of the Docker daemon.
 // Metrics are written every 60s to dataDir/build_metrics.log with ETA.
-func StartFromMongo(tagCnt int, threshold int64, ip myutils.IdentityProvider, dataDir string) {
+func StartFromMongo(tagCnt int, threshold int64, workers int, ip myutils.IdentityProvider, dataDir string) {
 	if myutils.GlobalDBClient.MongoFlag {
 		myutils.GlobalDBClient.Mongo.ResetStaleBuildClaims()
 	}
@@ -51,9 +51,9 @@ func StartFromMongo(tagCnt int, threshold int64, ip myutils.IdentityProvider, da
 
 	go checkpointWriter(cpCh, dataDir)
 
-	numRepo := runtime.NumCPU() * 8
-	if numRepo < 32 {
-		numRepo = 32
+	numRepo := workers
+	if numRepo <= 0 {
+		numRepo = 1
 	}
 	var wgRepo sync.WaitGroup
 	for i := 0; i < numRepo; i++ {
