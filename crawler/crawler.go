@@ -248,16 +248,17 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		if tokenPlateau {
 			myutils.Logger.Info(fmt.Sprintf(">>> PRUNING [%s]: token-match plateau (%d results, 0 new).", prefix, res.Count))
 		} else {
-			priority := 0
-			if newInPrefix > 0 { priority = 1 }
-			if !strings.Contains(prefix, "-") { priority = 2 }
 			lastChar := prefix[len(prefix)-1]
 			isSep := lastChar == '-' || lastChar == '_'
 			var models []mongo.WriteModel
 			for _, char := range alphabet {
 				if isSep && (char == '-' || char == '_') { continue }
+				child := prefix + string(char)
+				priority := 0
+				if newInPrefix > 0 { priority = 1 }
+				if !strings.Contains(child, "-") { priority = 2 }
 				models = append(models, mongo.NewUpdateOneModel().
-					SetFilter(bson.M{"_id": prefix + string(char)}).
+					SetFilter(bson.M{"_id": child}).
 					SetUpdate(bson.M{"$setOnInsert": bson.M{"status": "pending", "priority": priority}}).
 					SetUpsert(true))
 			}
