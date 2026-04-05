@@ -250,6 +250,7 @@ func (pc *ParallelCrawler) processTask(prefix string, client *http.Client, token
 		} else {
 			priority := 0
 			if newInPrefix > 0 { priority = 1 }
+			if !strings.Contains(prefix, "-") { priority = 2 }
 			lastChar := prefix[len(prefix)-1]
 			isSep := lastChar == '-' || lastChar == '_'
 			var models []mongo.WriteModel
