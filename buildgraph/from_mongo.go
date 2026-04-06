@@ -191,7 +191,7 @@ func markBuilt(repo *myutils.Repository, m *BuildMetrics, cpCh chan<- cpEntry) {
 func getTags(hub *myutils.HubClient, repo *myutils.Repository, m *BuildMetrics) []*myutils.Tag {
 	if myutils.GlobalDBClient.MongoFlag {
 		tags, err := myutils.GlobalDBClient.Mongo.FindAllTagsByRepoName(repo.Namespace, repo.Name)
-		if err == nil && allTagsHaveImages(tags) {
+		if err == nil && len(tags) > 0 && allTagsHaveImages(tags) {
 			m.TagCacheHits.Add(1)
 			return tags
 		}

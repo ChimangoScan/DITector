@@ -571,8 +571,10 @@ func (m *MyMongo) CountAllEligibleRepos(threshold int64) (int64, error) {
 }
 
 // CountPendingBuildRepos returns how many repos still need Stage II processing.
+// If threshold is 0, we can use an estimation to avoid a 60-second index scan
+// on 12+ million documents.
 func (m *MyMongo) CountPendingBuildRepos(threshold int64) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// Omit build_claimed filter — claimed repos are processed within seconds
 	// and the field is not indexed. Including it forces a full doc fetch on
@@ -580,7 +582,7 @@ func (m *MyMongo) CountPendingBuildRepos(threshold int64) (int64, error) {
 	return m.RepoColl.CountDocuments(ctx, bson.M{
 		"pull_count":     bson.M{"$gte": threshold},
 		"graph_built_at": nil,
-	})
+	}, options.Count().SetLimit(100000)) // Cap count at 100k to prevent O(N) DB scan stalls
 }
 
 func (m *MyMongo) FindRepositoryByName(namespace, name string) (*Repository, error) {
