@@ -55,10 +55,10 @@ func StartFromMongo(threshold int64, workers int, ip myutils.IdentityProvider, d
 		numRepo = 1
 	}
 
-	// batchChan decouples Hub API fetching (repoWorkers) from Neo4j insertion
-	// (graphWorkers), restoring parallel throughput while keeping atomicity:
-	// markBuilt is only called by graphWorker after all inserts succeed.
-	batchChan := make(chan GraphBatch, numRepo*4)
+	// Large buffer so repoWorkers never block waiting for Neo4j inserts.
+	// Mirrors the original jobChan buffer=10000: the repoWorker pipeline
+	// (Hub API + jitter) must never stall on graphWorker throughput.
+	batchChan := make(chan GraphBatch, 10000)
 
 	numGraph := runtime.NumCPU() * 2
 	if numGraph < 8 {
