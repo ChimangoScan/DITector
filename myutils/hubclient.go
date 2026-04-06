@@ -47,12 +47,15 @@ func (h *HubClient) Get(url string) ([]byte, int, error) {
 		case 200:
 			return body, 200, nil
 		case 401:
+			Logger.Warn(fmt.Sprintf("HTTP 401 (attempt %d/3): %s — rotating identity", i+1, url))
 			h.ip.ClearToken(h.token)
 			h.rotate()
 		case 429:
+			Logger.Warn(fmt.Sprintf("HTTP 429 rate-limit (attempt %d/3): %s — sleeping 15s then rotating", i+1, url))
 			time.Sleep(15 * time.Second)
 			h.rotate()
 		case 403:
+			Logger.Warn(fmt.Sprintf("HTTP 403 (attempt %d/3): %s — rotating identity", i+1, url))
 			h.rotate()
 		default:
 			return body, resp.StatusCode, nil
