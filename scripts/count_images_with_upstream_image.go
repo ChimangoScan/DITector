@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"runtime"
-	"sync"
 
 	"github.com/NSSL-SJTU/DITector/buildgraph"
 	"github.com/NSSL-SJTU/DITector/myutils"
@@ -28,11 +27,12 @@ func CountNodeWithUpstreamImages(output string, page int64, pageSize int, pullCo
 	if err != nil {
 		log.Fatalln("open file", output, "failed with:", err)
 	}
+	defer outputF.Close()
+
 	jobCh := make(chan buildgraph.GraphJob, runtime.NumCPU())
-	wg := sync.WaitGroup{}
 	chDone := make(chan struct{})
 
-	go loadDataFromMongo(page, pageSize, pullCountThreshold, jobCh, &wg)
+	go loadDataFromMongo(page, pageSize, pullCountThreshold, jobCh)
 	go countNodesWithUpstreamImages(jobCh, outputF, chDone)
 	<-chDone
 

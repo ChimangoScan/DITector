@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,8 +14,9 @@ import (
 // BuildMetrics tracks Stage II progress with lock-free atomic counters.
 // All fields are safe for concurrent use by multiple goroutines.
 type BuildMetrics struct {
-	startTime   time.Time
-	reposTotal  int64 // pending repos at startup — denominator for ETA
+	startTime  time.Time
+	reposTotal int64 // pending repos at startup (denominator for ETA)
+	reposDone  int64 // already processed in previous runs (offset for cumulative display)
 
 	Processed       atomic.Int64
 	TagCacheHits    atomic.Int64
@@ -28,11 +30,17 @@ type BuildMetrics struct {
 func newBuildMetrics(threshold int64) *BuildMetrics {
 	m := &BuildMetrics{startTime: time.Now()}
 	if myutils.GlobalDBClient.MongoFlag {
-		// Count AFTER ResetStaleBuildClaims so recovered orphans are included.
-		total, _ := myutils.GlobalDBClient.Mongo.CountPendingBuildRepos(threshold)
-		m.reposTotal = total
+		var pending, all int64
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); pending, _ = myutils.GlobalDBClient.Mongo.CountPendingBuildRepos(threshold) }()
+		go func() { defer wg.Done(); all, _ = myutils.GlobalDBClient.Mongo.CountAllEligibleRepos(threshold) }()
+		wg.Wait()
+		m.reposTotal = pending
+		m.reposDone = all - pending
 	}
-	myutils.Logger.Info(fmt.Sprintf(">>> BUILD METRICS: %d repos pendentes nessa execução", m.reposTotal))
+	myutils.Logger.Info(fmt.Sprintf(">>> BUILD METRICS: %d feitos, %d pendentes (total %d)",
+		m.reposDone, m.reposTotal, m.reposDone+m.reposTotal))
 	return m
 }
 
@@ -72,20 +80,23 @@ func (m *BuildMetrics) startReporter(dataDir string, done <-chan struct{}) {
 }
 
 func (m *BuildMetrics) snapshot() string {
-	processed := m.Processed.Load()
+	thisRun := m.Processed.Load()
+	cumulative := m.reposDone + thisRun
+	grandTotal := m.reposDone + m.reposTotal
 	elapsed := time.Since(m.startTime)
 
 	pct := 0.0
-	if m.reposTotal > 0 {
-		pct = float64(processed) / float64(m.reposTotal) * 100
+	if grandTotal > 0 {
+		pct = float64(cumulative) / float64(grandTotal) * 100
 	}
 
+	// ETA uses current-run rate against remaining pending repos.
 	rate := 0.0
 	eta := "calculando..."
-	if elapsed.Seconds() >= 30 && processed > 0 {
-		rate = float64(processed) / elapsed.Minutes()
+	if elapsed.Seconds() >= 30 && thisRun > 0 {
+		rate = float64(thisRun) / elapsed.Minutes()
 		if rate > 0 && m.reposTotal > 0 {
-			remaining := m.reposTotal - processed
+			remaining := m.reposTotal - thisRun
 			if remaining > 0 {
 				etaDur := time.Duration(float64(remaining)/rate*float64(time.Minute)).Round(time.Minute)
 				eta = etaDur.String()
@@ -108,7 +119,7 @@ func (m *BuildMetrics) snapshot() string {
 	return fmt.Sprintf(
 		"[METRICS %s] progresso=%d/%d (%.1f%%) | taxa=%.1f repos/min | ETA=%s | cache tags=%.0f%% imgs=%.0f%% | neo4j=%d | erros=%d | uptime=%s",
 		time.Now().Format("15:04:05"),
-		processed, m.reposTotal, pct,
+		cumulative, grandTotal, pct,
 		rate, eta,
 		tagCachePct, imgCachePct,
 		m.Neo4jInserts.Load(),

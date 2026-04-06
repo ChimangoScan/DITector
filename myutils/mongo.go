@@ -532,6 +532,14 @@ func (m *MyMongo) ResetStaleBuildClaims() {
 	}
 }
 
+// CountAllEligibleRepos returns total repos with pull_count >= threshold,
+// regardless of Stage II completion status. Used to compute cumulative progress.
+func (m *MyMongo) CountAllEligibleRepos(threshold int64) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return m.RepoColl.CountDocuments(ctx, bson.M{"pull_count": bson.M{"$gte": threshold}})
+}
+
 // CountPendingBuildRepos returns how many repos still need Stage II processing.
 func (m *MyMongo) CountPendingBuildRepos(threshold int64) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
