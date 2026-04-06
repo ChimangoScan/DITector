@@ -2,6 +2,23 @@
 
 ---
 
+## [3.2.0] — 2026-04-06
+
+### Modificado
+
+**`myutils/hubclient.go` — jitter reduzido:**
+- `HubClient.Get`: jitter por chamada alterado de `400+rand.Intn(500)` ms (intervalo [400, 900], média 650ms) para `200+rand.Intn(200)` ms (intervalo [200, 400], média 300ms). Redução de ~54% no overhead de sleep por chamada API. O intervalo mínimo de 200ms mantém a evasão do tarpit Cloudflare; valores abaixo de 200ms aumentam a taxa de respostas 429. Ganho estimado: +65% de throughput por worker (~23 → ~38 repos/min/worker).
+
+**`buildgraph/from_mongo.go` — writes MongoDB assíncronos:**
+- `persistImages`, `getTags`: substituição de `UpdateTag`/`UpdateImage` síncronos por envio ao canal `writesCh chan func()`. Uma goroutine dedicada (criada em `StartFromMongo`) drena o canal em background. O `repoWorker` não bloqueia aguardando writes de cache — avança imediatamente para o próximo repo. Ganho estimado: +5% (~80ms por repo devolvidos ao ciclo útil).
+- Assinaturas de `repoWorker`, `collectBatch`, `getTags`, `getImages`, `persistImages` atualizadas para propagar `writesCh`.
+- Canal fechado ordenadamente após `wgRepo.Wait()` e antes de `close(cpCh)`, garantindo que todos os writes em flight completem antes do shutdown.
+
+**`buildgraph/from_mongo.go` — sleep de empty-poll:**
+- `repoWorker`: sleep entre tentativas de claim sem resultado reduzido de 5s para 2s. Reduz latência de re-claim em cenários de contention com múltiplos workers.
+
+---
+
 ## [3.1.0] — 2026-04-05
 
 ### Adicionado
