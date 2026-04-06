@@ -503,7 +503,7 @@ func (m *MyMongo) ClaimNextBuildRepo(threshold int64) (*Repository, error) {
 		ctx,
 		bson.M{
 			"pull_count":     bson.M{"$gte": threshold},
-			"graph_built_at": bson.M{"$exists": false},
+			"graph_built_at": nil,
 			"build_claimed":  bson.M{"$ne": true},
 		},
 		bson.M{"$set": bson.M{"build_claimed": true, "build_started_at": time.Now()}},
@@ -524,7 +524,7 @@ func (m *MyMongo) ResetStaleBuildClaims() {
 	defer cancel()
 	res, _ := m.RepoColl.UpdateMany(
 		ctx,
-		bson.M{"build_claimed": true, "graph_built_at": bson.M{"$exists": false}},
+		bson.M{"build_claimed": true, "graph_built_at": nil},
 		bson.M{"$unset": bson.M{"build_claimed": "", "build_started_at": ""}},
 	)
 	if res != nil && res.ModifiedCount > 0 {
@@ -534,11 +534,11 @@ func (m *MyMongo) ResetStaleBuildClaims() {
 
 // CountPendingBuildRepos returns how many repos still need Stage II processing.
 func (m *MyMongo) CountPendingBuildRepos(threshold int64) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return m.RepoColl.CountDocuments(ctx, bson.M{
 		"pull_count":     bson.M{"$gte": threshold},
-		"graph_built_at": bson.M{"$exists": false},
+		"graph_built_at": nil,
 		"build_claimed":  bson.M{"$ne": true},
 	})
 }
