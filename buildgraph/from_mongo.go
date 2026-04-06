@@ -25,7 +25,6 @@ type cpEntry struct {
 type GraphBatch struct {
 	Repo *myutils.Repository
 	Jobs []GraphJob
-	cpCh chan<- cpEntry
 	m    *BuildMetrics
 }
 
@@ -109,13 +108,23 @@ func repoWorker(hub *myutils.HubClient, threshold int64, batchChan chan<- GraphB
 		}
 		emptyCount = 0
 
-		batch, ok := collectBatch(hub, repo, cpCh, m)
+		batch, ok := collectBatch(hub, repo, m)
 		if !ok {
 			myutils.Logger.Warn(fmt.Sprintf("!!! collectBatch failed for %s/%s, cooling off 30s...", repo.Namespace, repo.Name))
 			time.Sleep(30 * time.Second)
 			continue
 		}
 		batchChan <- batch
+		// Increment here (mirrors original defer markBuilt timing) so that
+		// taxa reflects Hub fetch throughput, not Neo4j insert latency.
+		// The actual MongoDB graph_built_at flag is only set by graphWorker
+		// after successful Neo4j inserts — atomicity is preserved.
+		m.Processed.Add(1)
+		cpCh <- cpEntry{
+			Namespace: repo.Namespace,
+			Name:      repo.Name,
+			BuiltAt:   time.Now().UTC().Format(time.RFC3339),
+		}
 		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond) // anti-fingerprint jitter
 	}
 }
@@ -124,7 +133,7 @@ func repoWorker(hub *myutils.HubClient, threshold int64, batchChan chan<- GraphB
 // cache) and returns a GraphBatch ready to be sent to graphWorker.
 // Returns (batch, false) on any API error — the repo stays claimed so
 // ResetStaleBuildClaims will retry it on the next run.
-func collectBatch(hub *myutils.HubClient, repo *myutils.Repository, cpCh chan<- cpEntry, m *BuildMetrics) (GraphBatch, bool) {
+func collectBatch(hub *myutils.HubClient, repo *myutils.Repository, m *BuildMetrics) (GraphBatch, bool) {
 	tags := getTags(hub, repo, m)
 	if tags == nil {
 		return GraphBatch{}, false
@@ -152,45 +161,40 @@ func collectBatch(hub *myutils.HubClient, repo *myutils.Repository, cpCh chan<- 
 			})
 		}
 	}
-	return GraphBatch{Repo: repo, Jobs: jobs, cpCh: cpCh, m: m}, true
+	return GraphBatch{Repo: repo, Jobs: jobs, m: m}, true
 }
 
-// graphWorker inserts all images in each batch into Neo4j. Only if every
-// insert succeeds does it call markBuilt — this is the atomicity guarantee.
+// graphWorker inserts all images in each batch into Neo4j using a single
+// session per batch. Only on full success does it call markBuilt.
 func graphWorker(batchChan <-chan GraphBatch) {
 	for batch := range batchChan {
-		allOk := true
+		items := make([]myutils.ImageInsert, 0, len(batch.Jobs))
 		for _, job := range batch.Jobs {
-			id := fmt.Sprintf("docker.io/%s/%s:%s@%s", job.RepoNamespace, job.RepoName, job.TagName, job.ImageMeta.Digest)
-			if err := myutils.GlobalDBClient.Neo4j.InsertImageToNeo4j(id, job.ImageMeta); err != nil {
-				batch.m.Errors.Add(1)
-				myutils.Logger.Error(fmt.Sprintf("Neo4j insert error for %s: %v", id, err))
-				allOk = false
-				break
-			}
-			batch.m.Neo4jInserts.Add(1)
+			items = append(items, myutils.ImageInsert{
+				Name:  fmt.Sprintf("docker.io/%s/%s:%s@%s", job.RepoNamespace, job.RepoName, job.TagName, job.ImageMeta.Digest),
+				Image: job.ImageMeta,
+			})
 		}
-		if allOk {
-			markBuilt(batch.Repo, batch.cpCh, batch.m)
-		} else {
-			myutils.Logger.Warn(fmt.Sprintf("!!! graphWorker: Neo4j falhou para %s/%s — repo será retentado no próximo reinício", batch.Repo.Namespace, batch.Repo.Name))
+		if err := myutils.GlobalDBClient.Neo4j.InsertBatch(items); err != nil {
+			batch.m.Errors.Add(1)
+			myutils.Logger.Warn(fmt.Sprintf("!!! Neo4j batch failed for %s/%s — will retry on restart", batch.Repo.Namespace, batch.Repo.Name))
+			continue
 		}
+		batch.m.Neo4jInserts.Add(int64(len(items)))
+		markBuilt(batch.Repo, batch.m)
 	}
 }
 
-func markBuilt(repo *myutils.Repository, cpCh chan<- cpEntry, m *BuildMetrics) {
+// markBuilt sets graph_built_at in MongoDB. Called by graphWorker only after
+// all Neo4j inserts for this repo succeed — this is the atomicity guarantee.
+// m.Processed and cpCh are handled by the repoWorker for display accuracy.
+func markBuilt(repo *myutils.Repository, m *BuildMetrics) {
 	if !myutils.GlobalDBClient.MongoFlag {
 		return
 	}
 	if err := myutils.GlobalDBClient.Mongo.MarkRepoGraphBuilt(repo.Namespace, repo.Name); err != nil {
 		myutils.Logger.Error(fmt.Sprintf("MarkRepoGraphBuilt %s/%s: %v", repo.Namespace, repo.Name, err))
-		return
-	}
-	m.Processed.Add(1)
-	cpCh <- cpEntry{
-		Namespace: repo.Namespace,
-		Name:      repo.Name,
-		BuiltAt:   time.Now().UTC().Format(time.RFC3339),
+		m.Errors.Add(1)
 	}
 }
 

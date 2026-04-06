@@ -82,187 +82,139 @@ func NewNeo4jDriver(target, username, password string, initFlag bool) (*MyNeo4j,
 	return ret, err
 }
 
-// layerRecord holds the precomputed IDs and data needed to insert one layer.
-// IDs are computed locally (pure SHA256 chains) before any network call.
-type layerRecord struct {
-	prevID string
-	currID string
-	layer  Layer
+// ImageInsert is the input unit for InsertBatch.
+type ImageInsert struct {
+	Name  string
+	Image *Image
 }
 
-// InsertImageToNeo4j inserts an image's full layer chain into Neo4j.
-//
-// All layer IDs are computed locally first (no I/O). Then the entire chain is
-// written in a SINGLE transaction — one BEGIN/COMMIT round-trip regardless of
-// how many layers the image has. This reduces latency from O(N) round-trips to
-// O(1) per image.
-//
-// imgName format: registry/namespace/repository:tag@digest
-func (neo4jDriver *MyNeo4j) InsertImageToNeo4j(imgName string, image *Image) error {
-	ctx := context.Background()
+// runTx executes a Cypher write query within a transaction and discards results.
+func runTx(ctx context.Context, tx neo4j.ManagedTransaction, q string, p map[string]any) error {
+	r, err := tx.Run(ctx, q, p)
+	if err != nil {
+		return err
+	}
+	_, err = r.Consume(ctx)
+	return err
+}
 
-	// 1. Precompute all IDs locally — pure CPU, no network.
-	records := make([]layerRecord, 0, len(image.Layers))
+// buildLayerParams computes Cypher UNWIND parameters for an image's layer chain.
+// Pure function — no I/O. Returns (params, topLayerID, error).
+func buildLayerParams(imgName string, image *Image) ([]map[string]any, string, error) {
+	params := make([]map[string]any, 0, len(image.Layers))
 	preID := ""
 	for i, layer := range image.Layers {
-		dig := ""
-		if layer.Digest != "" {
-			dig = Sha256Str(layer.Digest)
-		} else {
-			dig = Sha256Str(layer.Instruction)
+		src := layer.Digest
+		if src == "" {
+			src = layer.Instruction
 		}
+		dig := Sha256Str(src)
 		if dig == "" {
-			Logger.Error(fmt.Sprintf("digest of layer %d of image %s still none after calculating SHA256", i, imgName))
-			return fmt.Errorf("digest calculation failed")
+			return nil, "", fmt.Errorf("layer %d of %s: empty digest after SHA256", i, imgName)
 		}
 		currID := Sha256Str(preID + dig)
-		records = append(records, layerRecord{prevID: preID, currID: currID, layer: layer})
+		params = append(params, map[string]any{
+			"prevID":      preID,
+			"currID":      currID,
+			"digest":      layer.Digest,
+			"size":        layer.Size,
+			"instruction": layer.Instruction,
+		})
 		preID = currID
 	}
-	if len(records) == 0 {
-		return nil
+	return params, preID, nil
+}
+
+// insertTx writes one image's layer chain using an existing transaction.
+// Uses UNWIND to reduce round-trips to 3 regardless of layer count
+// (vs the previous O(N) approach of one tx.Run per layer).
+func insertTx(ctx context.Context, tx neo4j.ManagedTransaction, imgName string, params []map[string]any, topID string) error {
+	// Round-trip 1: merge all Layer nodes; for layers with a real digest also
+	// merge the corresponding RawLayer and the IS_SAME_AS edge.
+	if err := runTx(ctx, tx,
+		"UNWIND $p AS r "+
+			"MERGE (l:Layer {id: r.currID}) "+
+			"ON CREATE SET l.digest=r.digest, l.images=[], l.size=r.size, l.instruction=r.instruction "+
+			"WITH l, r WHERE r.digest <> '' "+
+			"MERGE (rl:RawLayer {digest: r.digest}) "+
+			"ON CREATE SET rl.size=r.size, rl.instruction=r.instruction "+
+			"MERGE (l)-[:IS_SAME_AS]-(rl)",
+		map[string]any{"p": params},
+	); err != nil {
+		return err
 	}
 
-	// 2. Write all layers + final image-name tag in ONE transaction.
-	session := neo4jDriver.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	// Round-trip 2: IS_BASE_OF edges. Requires all Layer nodes to exist (round-trip 1).
+	if len(params) > 1 {
+		if err := runTx(ctx, tx,
+			"UNWIND $p AS r WITH r WHERE r.prevID <> '' "+
+				"MATCH (prev:Layer {id: r.prevID}), (curr:Layer {id: r.currID}) "+
+				"MERGE (prev)-[:IS_BASE_OF]->(curr)",
+			map[string]any{"p": params},
+		); err != nil {
+			return err
+		}
+	}
 
-	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		for i, r := range records {
-			work := addNewLayerFunc(ctx, r.prevID, r.currID, r.layer)
-			if _, err := work(tx); err != nil {
-				return nil, fmt.Errorf("layer %d: %w", i, err)
-			}
-		}
-		work := addImageToLayerFunc(ctx, imgName, preID)
-		if _, err := work(tx); err != nil {
-			return nil, fmt.Errorf("addImageToLayer: %w", err)
-		}
-		return nil, nil
+	// Round-trip 3: tag the top layer with the image name.
+	return runTx(ctx, tx,
+		"MATCH (l:Layer {id: $id}) "+
+			"SET l.images = CASE WHEN NOT $name IN l.images THEN l.images + $name ELSE l.images END",
+		map[string]any{"id": topID, "name": imgName},
+	)
+}
+
+// InsertImageToNeo4j inserts a single image's layer chain into Neo4j.
+// imgName format: registry/namespace/repository:tag@digest
+func (n *MyNeo4j) InsertImageToNeo4j(imgName string, image *Image) error {
+	params, topID, err := buildLayerParams(imgName, image)
+	if err != nil {
+		Logger.Error(err.Error())
+		return err
+	}
+	if len(params) == 0 {
+		return nil
+	}
+	ctx := context.Background()
+	session := n.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return nil, insertTx(ctx, tx, imgName, params, topID)
 	})
 	if err != nil {
-		Logger.Error(fmt.Sprintf("insert image %s failed: %s", imgName, err))
+		Logger.Error(fmt.Sprintf("InsertImageToNeo4j %s: %v", imgName, err))
 	}
 	return err
 }
 
-// addNewLayerFunc 返回可用于session.ExecuteWrite的func，将Layer节点及节点间的边插入neo4j
-func addNewLayerFunc(ctx context.Context, previousHash, idHash string, layer Layer) neo4j.ManagedTransactionWork {
-	// 节点的两种label
-	// Layer:
-	// 		id: hash(1-2-5)
-	// 		digest: layer-ID
-	// 		images: [namespace1/repository1:tag1, ...]
-	// RawLayer:
-	// 		digest: layer-ID
-	// 		size: size
-	//		instruction: instruction
-
-	// 当前层为镜像的第一层，只需要插入层信息即可
-	if previousHash == "" {
-		// 配置命令对应的层不创建RawLayer
-		if layer.Digest == "" {
-			return func(tx neo4j.ManagedTransaction) (any, error) {
-				var result, err = tx.Run(ctx,
-					"MERGE (l:Layer {id: $idHash}) "+
-						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction",
-					map[string]any{"idHash": idHash, "digest": layer.Digest, "images": []string{},
-						"size": layer.Size, "instruction": layer.Instruction},
-				)
-
-				if err != nil {
-					return nil, err
-				}
-
-				return result.Consume(ctx)
-			}
-		} else {
-			return func(tx neo4j.ManagedTransaction) (any, error) {
-				var result, err = tx.Run(ctx,
-					"MERGE (l:Layer {id: $idHash}) "+
-						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction "+
-						"WITH l "+
-						"MERGE (rl:RawLayer {digest: $digest}) "+
-						"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
-						"WITH l,rl "+
-						"MERGE (l)-[:IS_SAME_AS]-(rl)",
-					map[string]any{"idHash": idHash, "digest": layer.Digest, "images": []string{},
-						"size": layer.Size, "instruction": layer.Instruction},
-				)
-
-				if err != nil {
-					return nil, err
-				}
-
-				return result.Consume(ctx)
-			}
-		}
-	} else {
-		// 当前层非镜像第一层，需要插入层节点、边previous-->current
-		// 配置命令对应的层不创建RawLayer
-		if layer.Digest == "" {
-			return func(tx neo4j.ManagedTransaction) (any, error) {
-				var result, err = tx.Run(ctx,
-					"MERGE (l:Layer {id: $idHash}) "+
-						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction "+
-						"WITH l "+
-						"MATCH (previous:Layer {id: $previousHash}) "+
-						"MERGE (previous)-[:IS_BASE_OF]->(l)",
-					map[string]any{"previousHash": previousHash, "idHash": idHash, "digest": layer.Digest, "images": []string{},
-						"size": layer.Size, "instruction": layer.Instruction},
-				)
-
-				if err != nil {
-					return nil, err
-				}
-
-				return result.Consume(ctx)
-			}
-		} else {
-			return func(tx neo4j.ManagedTransaction) (any, error) {
-				var result, err = tx.Run(ctx,
-					"MERGE (l:Layer {id: $idHash}) "+
-						"ON CREATE SET l.digest=$digest, l.images=$images, l.size=$size, l.instruction=$instruction "+
-						"WITH l "+
-						"MERGE (rl:RawLayer {digest: $digest}) "+
-						"ON CREATE SET rl.size=$size, rl.instruction=$instruction "+
-						"WITH l,rl "+
-						"MERGE (l)-[:IS_SAME_AS]-(rl) "+
-						"WITH l "+
-						"MATCH (previous:Layer {id: $previousHash}) "+
-						"MERGE (previous)-[:IS_BASE_OF]->(l)",
-					map[string]any{"previousHash": previousHash, "idHash": idHash, "digest": layer.Digest, "images": []string{},
-						"size": layer.Size, "instruction": layer.Instruction},
-				)
-
-				if err != nil {
-					return nil, err
-				}
-
-				return result.Consume(ctx)
-			}
-		}
+// InsertBatch inserts multiple images using a single Neo4j session.
+// Each image gets its own transaction (avoids long lock-holding across images),
+// but session reuse eliminates per-image connection overhead.
+// Returns on the first error; the caller is responsible for retry logic.
+func (n *MyNeo4j) InsertBatch(items []ImageInsert) error {
+	if len(items) == 0 {
+		return nil
 	}
-}
-
-// addImageToLayerFunc 返回可用于session.ExecuteWrite的func，将image添加到最顶层
-func addImageToLayerFunc(ctx context.Context, imageName, idHash string) neo4j.ManagedTransactionWork {
-
-	return func(tx neo4j.ManagedTransaction) (any, error) {
-		var result, err = tx.Run(ctx,
-			"MATCH (l:Layer {id: $idHash}) "+
-				"SET l.images = CASE WHEN NOT $imageName IN l.images THEN l.images + $imageName "+
-				"ELSE l.images "+
-				"END",
-			map[string]any{"idHash": idHash, "imageName": imageName},
-		)
-
+	ctx := context.Background()
+	session := n.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+	for _, item := range items {
+		params, topID, err := buildLayerParams(item.Name, item.Image)
 		if err != nil {
-			return nil, err
+			Logger.Error(err.Error())
+			return err
 		}
-
-		return result.Consume(ctx)
+		if len(params) == 0 {
+			continue
+		}
+		if _, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+			return nil, insertTx(ctx, tx, item.Name, params, topID)
+		}); err != nil {
+			Logger.Error(fmt.Sprintf("InsertBatch %s: %v", item.Name, err))
+			return err
+		}
 	}
+	return nil
 }
 
 // FindLayerByNodeId 根据node id查找Layer节点
