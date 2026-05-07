@@ -37,9 +37,18 @@ type GraphBatch struct {
 // so it survives container restarts independently of the Docker daemon.
 // Metrics are written every 60s to dataDir/build_metrics.log with ETA.
 func StartFromMongo(threshold int64, workers int, ip myutils.IdentityProvider, dataDir string) {
-	if myutils.GlobalDBClient.MongoFlag {
-		myutils.GlobalDBClient.Mongo.ResetStaleBuildClaims()
+	// Stage II requires both Mongo and Neo4j. Failing fast (and exiting non-zero)
+	// lets Docker's restart policy retry until the dependency becomes available,
+	// instead of silently proceeding with a nil driver and panicking later.
+	if !myutils.GlobalDBClient.MongoFlag {
+		myutils.Logger.Error("MongoDB not connected — Stage II cannot start; exiting for restart")
+		os.Exit(1)
 	}
+	if !myutils.GlobalDBClient.Neo4jFlag {
+		myutils.Logger.Error("Neo4j not connected — Stage II cannot start; exiting for restart")
+		os.Exit(1)
+	}
+	myutils.GlobalDBClient.Mongo.ResetStaleBuildClaims()
 
 	m := newBuildMetrics(threshold)
 	metricsDone := make(chan struct{})
