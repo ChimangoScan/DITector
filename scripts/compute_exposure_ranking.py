@@ -368,44 +368,62 @@ def main():
             return v[1]
         return "latest"
 
+    # ---- dedup por nó Layer ----
+    # Imagens com o MESMO top-layer node têm conteúdo idêntico (mesma pilha de layers).
+    # Escanear todas é redundante. Para cada nó, mantemos apenas o repo com maior pull_count
+    # (o mais "canônico" do conteúdo). Rebrands com 0 pulls não entram na fila.
+    log("PHASE 4: dedup por layer node (mantém repo mais popular por conteúdo idêntico)")
+    layer_best_ref = {}   # ni -> (ref, pull_count)
+    n_deduplicated = 0
+    for ni, imgs in top_images.items():
+        best_ref, best_pc = None, -1
+        for ref in imgs:
+            ns, repo, _, _ = ref_parsed[ref]
+            pc = repo_pull.get(ns + KEYSEP + repo, 0)
+            if pc > best_pc:
+                best_pc = pc
+                best_ref = ref
+        if best_ref:
+            layer_best_ref[ni] = best_ref
+            n_deduplicated += len(imgs) - 1  # quantos foram descartados
+    log(f"  layer nodes: {len(layer_best_ref)}  refs descartados por conteúdo duplicado: {n_deduplicated}")
+
     # ---- rank ----
     log("PHASE 4: rank images")
     best = {}   # "ns\x00repo" -> (chosen_dict, matched_bool)
     n_refs = 0
-    for ni, imgs in top_images.items():
+    for ni, ref in layer_best_ref.items():
         dps = sub_p[ni] - self_p[ni]
         dw = sub_w[ni] - self_w[ni]
-        for ref in imgs:
-            ns, repo, tag, digest = ref_parsed[ref]
-            key = ns + KEYSEP + repo
-            pc = repo_pull.get(key, 0)
-            exposure = pc + dps
-            rt = repr_tag(key)
-            matched = (tag == rt)
-            cand = {
-                "repository_namespace": ns,
-                "repository_name": repo,
-                "tag_name": rt,
-                "image_digest": digest,
-                "pull_count": pc,
-                "dependency_weight": dw,
-                "downstream_pull_sum": dps,
-                "exposure": exposure,
-            }
-            rec = best.get(key)
-            if rec is None:
-                best[key] = (cand, matched)
-            else:
-                cur, cur_matched = rec
-                if matched and not cur_matched:
-                    best[key] = (cand, True)
-                elif matched == cur_matched:
-                    if exposure > cur["exposure"]:
-                        best[key] = (cand, matched)
-                # if cur_matched and not matched: keep cur
-            n_refs += 1
-            if n_refs % 1_000_000 == 0:
-                log("  refs:", n_refs)
+        ns, repo, tag, digest = ref_parsed[ref]
+        key = ns + KEYSEP + repo
+        pc = repo_pull.get(key, 0)
+        exposure = pc + dps
+        rt = repr_tag(key)
+        matched = (tag == rt)
+        cand = {
+            "repository_namespace": ns,
+            "repository_name": repo,
+            "tag_name": rt,
+            "image_digest": digest,
+            "pull_count": pc,
+            "dependency_weight": dw,
+            "downstream_pull_sum": dps,
+            "exposure": exposure,
+        }
+        rec = best.get(key)
+        if rec is None:
+            best[key] = (cand, matched)
+        else:
+            cur, cur_matched = rec
+            if matched and not cur_matched:
+                best[key] = (cand, True)
+            elif matched == cur_matched:
+                if exposure > cur["exposure"]:
+                    best[key] = (cand, matched)
+        n_refs += 1
+        if n_refs % 1_000_000 == 0:
+            log("  refs:", n_refs)
     log("  total graph image refs:", n_refs, " distinct repos:", len(best))
 
     rows = []
