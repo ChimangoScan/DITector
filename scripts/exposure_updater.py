@@ -97,8 +97,10 @@ def upsert_top_n(conn: sqlite3.Connection, jsonl_path: str, top_n: int) -> tuple
       VALUES(?, ?, ?, ?, 'pending', ?)
       ON CONFLICT(image) DO UPDATE
         SET weight = excluded.weight
-        WHERE jobs.status = 'pending'
     """
+    # Nota: sem WHERE — atualiza weight para TODOS os status (pending, done, skipped…).
+    # O status nunca é tocado aqui. O coordinator não usa weight de jobs done, então é seguro.
+    # Isso garante que o dashboard sempre leia a exposure atualizada via jobs.weight.
     with open_jsonl(jsonl_path) as f:
         batch = []
         for i, line in enumerate(f):
@@ -115,14 +117,13 @@ def upsert_top_n(conn: sqlite3.Connection, jsonl_path: str, top_n: int) -> tuple
                                      separators=(",", ":"))
             batch.append((image, name, target_json, weight, now))
             if len(batch) >= 5000:
-                cur = conn.executemany(insert_sql, batch)
-                # executemany doesn't reliably return per-row rowcount in sqlite3,
-                # so we re-query: count rows whose created_at == now
+                conn.executemany(insert_sql, batch)
+                conn.commit()  # commit por batch — evita transação única de 500k rows que causa WAL de 29GB
                 batch.clear()
         if batch:
             conn.executemany(insert_sql, batch)
+            conn.commit()
             batch.clear()
-    conn.commit()
     # post-hoc counts
     inserted = conn.execute("SELECT COUNT(*) FROM jobs WHERE created_at = ?", (now,)).fetchone()[0]
     return inserted, top_n - inserted  # rough; updated ≈ top_n − inserted
@@ -139,12 +140,20 @@ def trim_pending(conn: sqlite3.Connection, top_n: int) -> int:
     if row is None:
         return 0
     threshold = row[0]
-    cur = conn.execute(
-        "DELETE FROM jobs WHERE status='pending' AND weight < ?",
-        (threshold,)
-    )
-    conn.commit()
-    return cur.rowcount
+    # delete em batches de 10k para não criar transação gigante e explodir o WAL
+    deleted = 0
+    while True:
+        cur = conn.execute(
+            "DELETE FROM jobs WHERE id IN ("
+            "  SELECT id FROM jobs WHERE status='pending' AND weight < ? LIMIT 10000"
+            ")",
+            (threshold,)
+        )
+        conn.commit()
+        deleted += cur.rowcount
+        if cur.rowcount == 0:
+            break
+    return deleted
 
 
 def iterate_once(args):
@@ -191,7 +200,7 @@ def iterate_once(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--queue-db", required=True)
-    ap.add_argument("--ranker-script", default="scripts/compute_exposure_ranking.py",
+    ap.add_argument("--ranker-script", default="compute_exposure_ranking.py",
                     help="path to compute_exposure_ranking.py")
     ap.add_argument("--work-dir", default=os.path.expanduser("~/scanners/data/exposure_work"),
                     help="ranker scratch dir (dumps cached here)")

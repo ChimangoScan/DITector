@@ -97,8 +97,10 @@ def upsert_top_n(conn: sqlite3.Connection, jsonl_path: str, top_n: int) -> tuple
       VALUES(?, ?, ?, ?, 'pending', ?)
       ON CONFLICT(image) DO UPDATE
         SET weight = excluded.weight
-        WHERE jobs.status = 'pending'
     """
+    # Nota: sem WHERE — atualiza weight para TODOS os status (pending, done, skipped…).
+    # O status nunca é tocado aqui. O coordinator não usa weight de jobs done, então é seguro.
+    # Isso garante que o dashboard sempre leia a exposure atualizada via jobs.weight.
     with open_jsonl(jsonl_path) as f:
         batch = []
         for i, line in enumerate(f):
