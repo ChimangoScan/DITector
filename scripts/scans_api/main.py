@@ -359,7 +359,7 @@ def _build_containers_snapshot() -> dict:
             exposure = float(exposure or 0)
         except Exception:
             exposure = 0.0
-        img = r.get("image") or tgt.get("image") or image
+        img = image  # reports.image column — always has @sha256: inherited from jobs.image
         fa = r.get("finished_at")
         if not fa and finished_at:
             fa = _dt.datetime.fromtimestamp(float(finished_at), _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
