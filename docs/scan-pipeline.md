@@ -584,6 +584,243 @@ Coordinator (ditector.db — SQLite):
 
 ---
 
+## Schemas dos bancos de dados
+
+### MongoDB — `dockerhub_data`
+
+#### `repositories_data` (12.716.568 docs)
+Populado pelo **Stage I** (crawler).
+
+```json
+{
+  "_id":         "ObjectId",
+  "namespace":   "library",
+  "name":        "alpine",
+  "pull_count":  { "high": 0, "low": 10123456789, "unsigned": false },
+  "star_count":  { "high": 0, "low": 9999, "unsigned": false },
+  "description": "...",
+  "is_private":  false,
+  "last_updated": "2026-04-01T00:00:00Z",
+  "graph_built_at": "2026-05-14T03:00:00Z"   // null se Stage II ainda não processou
+}
+```
+
+Índices: `{namespace,name}` (unique lookup), `{pull_count:-1}` (ranking), `{graph_built_at:1}` (Stage II progress).
+
+---
+
+#### `tags_data` (5.732.556 docs)
+Populado pelo **Stage II** (builder), uma entrada por tag de cada repo.
+
+```json
+{
+  "_id":                   "ObjectId",
+  "repositories_namespace": "library",
+  "repositories_name":      "alpine",
+  "name":                   "latest",
+  "digest":                 "sha256:1775bebec...",
+  "content_type":           "image",
+  "creator":                0,
+  "id":                     123456,
+  "last_updated":           "2026-04-01T00:00:00Z",
+  "tag_status":             "active",
+  "full_size":              { "high": 0, "low": 3500000, "unsigned": false },
+  "images": [
+    {
+      "architecture": "amd64",
+      "os":           "linux",
+      "digest":       "sha256:abc123...",
+      "size":         { "high": 0, "low": 3500000, "unsigned": false },
+      "status":       "active",
+      "last_pulled":  "2026-04-05T18:33:45Z",
+      "last_pushed":  "2026-04-05T14:36:41Z"
+    }
+  ]
+}
+```
+
+Índices: `{repositories_namespace, repositories_name, name}` (lookup por tag), `{repositories_namespace, repositories_name}`.
+
+---
+
+#### `images_data` (6.709.152 docs)
+Populado pelo **Stage II**. Uma entrada por digest de imagem (por arquitetura).
+
+```json
+{
+  "_id":         "ObjectId",
+  "digest":      "sha256:1e70e0ad...",
+  "architecture": "amd64",
+  "last_pulled": "2026-04-05T18:33:45Z",
+  "last_pushed": "2026-04-05T14:36:41Z",
+  "layers": [
+    {
+      "digest":      "sha256:fd582657...",
+      "size":        { "high": 0, "low": 4471206, "unsigned": false },
+      "instruction": "COPY /image/ / # buildkit"
+    },
+    {
+      "digest":      "sha256:00000000...",   // digest vazio = layer de metadata
+      "size":        { "high": 0, "low": 0, "unsigned": false },
+      "instruction": "USER 65532:65532"
+    }
+  ]
+}
+```
+
+Índice: `{digest:1}` (lookup por digest).
+
+---
+
+#### `crawler_keywords` (2.051.801 docs)
+Estado da busca por prefixo do **Stage I**.
+
+```json
+{
+  "_id":        "alpine",          // o prefixo buscado
+  "status":     "done",            // pending | processing | done
+  "priority":   251,               // 255 - len(prefixo); maior = processado primeiro
+  "crawled_at": "2026-04-03T19:17:21Z",
+  "finished_at": "2026-04-03T21:48:48Z"
+}
+```
+
+---
+
+### Neo4j — grafo IS_BASE_OF
+
+Nó `Layer` — representa uma camada de imagem Docker:
+
+```
+(:Layer {
+  id:          "sha256:abc123...",   // Layer.id = sha256(parent_id + sha256(digest))
+  digest:      "sha256:fd5826...",   // digest da camada em si
+  size:        4471206,              // bytes
+  instruction: "COPY /image/ / # buildkit",  // instrução do Dockerfile
+  images:      ["docker.io/library/alpine:latest@sha256:1775...",  ...]
+               // refs de imagens cujo top layer é este nó (presente só no top layer)
+})
+```
+
+Relação `IS_BASE_OF`:
+
+```
+(:Layer)-[:IS_BASE_OF]->(:Layer)
+// pai → filho: o filho usa o pai como camada base
+// cada Layer tem no máximo UM pai (ID determinístico)
+// o grafo é uma floresta de out-trees com ~50 M edges
+```
+
+---
+
+### SQLite — `ditector.db` (fila de scan)
+
+#### `jobs` (504.837 linhas)
+
+```sql
+CREATE TABLE jobs (
+  id           INTEGER PRIMARY KEY,
+  image        TEXT NOT NULL UNIQUE,   -- "ns/repo:tag@sha256:digest"
+  name         TEXT NOT NULL,          -- slug filesystem-safe
+  target_json  TEXT NOT NULL,          -- JSON com meta de exposure (ver abaixo)
+  weight       REAL NOT NULL DEFAULT 0,-- = exposure; define a ordem da fila
+  status       TEXT NOT NULL DEFAULT 'pending',  -- pending|running|done|skipped|failed
+  worker_id    TEXT,                   -- "hostname/pid#slot" do worker atual
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  error        TEXT,
+  created_at   REAL NOT NULL,          -- epoch float
+  started_at   REAL,
+  heartbeat_at REAL,                   -- atualizado a cada ~30s pelo worker
+  finished_at  REAL
+);
+```
+
+`target_json` expandido:
+
+```json
+{
+  "image":  "browsers/chrome:latest@sha256:0a362...",
+  "name":   "browsers_chrome_latest",
+  "weight": 192453.0,
+  "meta": {
+    "repository_namespace": "browsers",
+    "repository_name":      "chrome",
+    "tag_name":             "latest",
+    "image_digest":         "sha256:0a362...",
+    "pull_count":           189696,
+    "dependency_weight":    9,
+    "downstream_pull_sum":  2757,
+    "exposure":             192453
+  }
+}
+```
+
+Índices: `idx_jobs_claim (status, weight DESC, id)`, `idx_jobs_status (status)`, `idx_jobs_heartbeat (status, heartbeat_at)`.
+
+---
+
+#### `reports` (8.382 linhas)
+
+```sql
+CREATE TABLE reports (
+  image        TEXT PRIMARY KEY,   -- mesmo valor de jobs.image
+  report_json  TEXT NOT NULL,      -- JSON completo do relatório (ver abaixo)
+  n_findings   INTEGER NOT NULL DEFAULT 0,  -- total de findings merged
+  finished_at  REAL NOT NULL       -- epoch float
+);
+```
+
+Índices: `idx_reports_finished_at (finished_at DESC)`, `idx_reports_n_findings (n_findings)`.
+
+`report_json` expandido:
+
+```json
+{
+  "target": {
+    "image":  "alpine:latest@sha256:1775...",
+    "name":   "alpine_latest",
+    "weight": 101239064764.0,
+    "meta":   { "pull_count": 10123456789, "exposure": 101239064764, ... }
+  },
+  "started_at":    "2026-05-12T21:15:50Z",
+  "finished_at":   "2026-05-12T21:16:03Z",
+  "container_ip":  null,
+  "open_ports":    [],
+  "http_endpoints": [],
+  "invocations": [
+    {
+      "scanner":      "syft",
+      "status":       "ok-cached",    // ok | ok-cached | error | skipped | pull-failed | timeout
+      "findings":     16,
+      "findings_by_severity": { "info": 16 },
+      "wall_seconds": 0.0,
+      "exit_code":    0,
+      "error":        "",
+      "image_ref":    "anchore/syft:latest",
+      "mode":         "static",
+      "started_at":   "2026-05-12T21:15:53Z"
+    }
+    // ... um por scanner
+  ],
+  "findings": [ /* lista de Finding merged — schema abaixo */ ]
+}
+```
+
+---
+
+#### `exposure_state` (1 linha)
+Watermark do daemon `exposure-updater`.
+
+```sql
+CREATE TABLE exposure_state (
+  key        TEXT PRIMARY KEY,   -- ex: "last_run_at"
+  value      TEXT NOT NULL,
+  updated_at REAL NOT NULL
+);
+```
+
+---
+
 ## Schema normalizado de um Finding
 
 Todos os scanners são normalizados para este schema antes do merge:
