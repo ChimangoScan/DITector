@@ -142,10 +142,10 @@ footer{text-align:center;color:var(--mut);font-size:11px;margin-top:30px;font-fa
   <div class="charts row2">
     <div class="chart">
       <h3>findings por container (histograma)</h3>
-      <div class="sub">quantos containers caem em cada faixa de nº de findings</div>
+      <div class="sub">quantos containers caem em cada faixa de nº de findings (inclui info/baixa/média)</div>
       <div class="canvas-box"><canvas id="chart-hist"></canvas></div>
     </div>
-    <div class="chart">
+    <div class="chart" style="grid-column:span 2;min-width:0">
       <h3>top-15 containers mais vulneráveis</h3>
       <div class="sub">soma de findings críticos + altos</div>
       <div class="canvas-box"><canvas id="chart-top-vuln"></canvas></div>
@@ -157,6 +157,25 @@ footer{text-align:center;color:var(--mut);font-size:11px;margin-top:30px;font-fa
   <h2>últimos alvos escaneados</h2>
   <div class="recent-list" id="recent-list"></div>
 </section>
+
+<section>
+  <h2>próximos 25 na fila (pendentes)</h2>
+  <div style="color:var(--mut);font-size:11px;margin-bottom:8px">os próximos alvos pendentes por exposição decrescente — claim atômico, o de maior <code>weight</code> sai primeiro</div>
+  <div class="recent-list" id="queue-pending-list"></div>
+</section>
+
+<section>
+  <h2>top 25 pulados (skipped) — com motivo</h2>
+  <div style="color:var(--mut);font-size:11px;margin-bottom:8px">alvos descartados pelo worker (geralmente arm32/arm64/ppc64le/s390x que workers amd64 nao puxam, ou pull falhou). O motivo aparece em vermelho.</div>
+  <div class="recent-list" id="queue-skipped-list"></div>
+</section>
+
+<section>
+  <h2>top 25 com falha (failed) — com motivo</h2>
+  <div style="color:var(--mut);font-size:11px;margin-bottom:8px">scans que falharam em runtime após N tentativas. Motivo em vermelho (timeout, scanner crash, OOM…).</div>
+  <div class="recent-list" id="queue-failed-list"></div>
+</section>
+
 
 <section>
   <h2>top containers por exposição</h2>
@@ -195,6 +214,6 @@ footer{text-align:center;color:var(--mut);font-size:11px;margin-top:30px;font-fa
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="dashboard.js"></script>
+<script src="dashboard.js?v=2026051417"></script>
 </body>
 </html>
