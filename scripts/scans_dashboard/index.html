@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>scans.anonshield.org · DITector dashboard</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#0e1116; --bg2:#161a22; --bg3:#1e2330; --br:#2a3142;
+  --txt:#e6e8ee; --mut:#8b95a8; --acc:#5dc8ff; --ok:#6fcf97; --warn:#f2c94c; --err:#eb5757;
+  --crit:#eb5757; --high:#f28b30; --med:#f2c94c; --low:#56a8ff; --info:#8b95a8;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:14px;line-height:1.45}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--br);padding:14px 24px;z-index:10;display:flex;justify-content:space-between;align-items:center}
+header h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.2px}
+header h1 small{color:var(--mut);font-weight:400;margin-left:10px;font-size:13px}
+header .ts{color:var(--mut);font-size:12px;font-family:var(--mono)}
+main{padding:18px 24px 60px;max-width:1400px;margin:0 auto}
+section{margin-bottom:26px}
+section > h2{font-size:13px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 10px}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.kpi{background:var(--bg2);border:1px solid var(--br);border-radius:8px;padding:14px 16px}
+.kpi .lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+.kpi .val{font-size:26px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:12px;color:var(--mut);margin-top:2px;font-family:var(--mono)}
+.kpi .val.pct{color:var(--acc)}
+.kpi .val.rate{color:var(--ok)}
+
+/* máquinas */
+.hosts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.host{background:var(--bg2);border:1px solid var(--br);border-radius:8px;padding:12px 14px;position:relative}
+.host .dot{position:absolute;top:14px;right:14px;width:8px;height:8px;border-radius:50%;background:var(--err)}
+.host.online .dot{background:var(--ok)}
+.host h3{margin:0;font-size:14px;font-weight:600;font-family:var(--mono)}
+.host .role{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+.host .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px;font-size:12px}
+.host .stats div span{display:block;color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+.host .stats div b{font-weight:600;font-variant-numeric:tabular-nums}
+
+/* charts */
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.charts.row2{grid-template-columns:repeat(auto-fit,minmax(380px,1fr))}
+.chart{background:var(--bg2);border:1px solid var(--br);border-radius:8px;padding:14px;display:flex;flex-direction:column}
+.chart h3{margin:0 0 4px;font-size:13px;font-weight:600;color:var(--txt)}
+.chart .sub{color:var(--mut);font-size:11px;margin-bottom:8px}
+.chart .canvas-box{position:relative;height:260px;width:100%}
+.chart canvas{display:block;width:100%!important;height:100%!important;max-height:260px!important}
+
+/* tabela */
+.tbl-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.tbl-toolbar input{flex:1;background:var(--bg2);border:1px solid var(--br);color:var(--txt);padding:8px 12px;border-radius:6px;font-size:13px;font-family:var(--mono)}
+.tbl-toolbar input:focus{outline:none;border-color:var(--acc)}
+.tbl-toolbar .count{color:var(--mut);font-size:12px;font-family:var(--mono);white-space:nowrap}
+.tbl-wrap{background:var(--bg2);border:1px solid var(--br);border-radius:8px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{background:var(--bg3);color:var(--mut);font-weight:600;text-align:left;padding:9px 10px;text-transform:uppercase;font-size:10.5px;letter-spacing:.5px;border-bottom:1px solid var(--br);cursor:pointer;user-select:none}
+thead th.num{text-align:right}
+thead th:hover{color:var(--txt)}
+tbody td{padding:8px 10px;border-bottom:1px solid #1a1f2c;font-variant-numeric:tabular-nums}
+tbody td.num{text-align:right;font-family:var(--mono)}
+tbody td.img{font-family:var(--mono);font-size:11.5px;max-width:560px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tbody tr:hover{background:var(--bg3)}
+.sev{display:inline-flex;gap:2px}
+.sev span{display:inline-block;width:6px;height:14px;border-radius:1px}
+.sev .c{background:var(--crit)}.sev .h{background:var(--high)}.sev .m{background:var(--med)}
+.sev .l{background:var(--low)}.sev .i{background:var(--info)}.sev .u{background:#555}
+.pill{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;background:var(--bg3);color:var(--mut);font-family:var(--mono)}
+.pager{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg2);border-top:1px solid var(--br);font-size:12px;color:var(--mut)}
+.pager button{background:var(--bg3);border:1px solid var(--br);color:var(--txt);padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px}
+.pager button:disabled{opacity:.4;cursor:not-allowed}
+.pager button:hover:not(:disabled){border-color:var(--acc)}
+/* lista de recent */
+.recent-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:6px}
+.recent-list .item{background:var(--bg2);border:1px solid var(--br);border-radius:6px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px}
+.recent-list .item .img{font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;color:var(--txt)}
+.recent-list .item .meta{display:flex;gap:8px;align-items:center;color:var(--mut);font-size:11px;white-space:nowrap}
+.recent-list .item .findings{color:var(--acc);font-weight:600;font-variant-numeric:tabular-nums}
+footer{text-align:center;color:var(--mut);font-size:11px;margin-top:30px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DITector <small>varredura de containers Docker Hub por exposição</small></h1>
+  <div class="ts"><span id="last-update">carregando…</span></div>
+</header>
+
+<main>
+
+<section>
+  <h2>resumo</h2>
+  <div class="kpis" id="kpis"></div>
+</section>
+
+<section>
+  <h2>máquinas</h2>
+  <div class="hosts" id="hosts"></div>
+</section>
+
+<section>
+  <h2>panorama temporal</h2>
+  <div class="charts">
+    <div class="chart" style="grid-column:span 2;min-width:0">
+      <h3>scans por hora</h3>
+      <div class="sub">últimas 48 h · barras = relatórios fechados em cada bucket de 1 h</div>
+      <div class="canvas-box"><canvas id="chart-timeline"></canvas></div>
+    </div>
+    <div class="chart">
+      <h3>severidade dos findings</h3>
+      <div class="sub">soma de todos os scans concluídos</div>
+      <div class="canvas-box"><canvas id="chart-severity"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>panorama por scanner</h2>
+  <div class="charts row2">
+    <div class="chart" style="grid-column:span 2;min-width:0">
+      <h3>findings por scanner</h3>
+      <div class="sub">empilhado por severidade · todos os containers escaneados</div>
+      <div class="canvas-box"><canvas id="chart-scanner-sev"></canvas></div>
+    </div>
+    <div class="chart">
+      <h3>taxa de sucesso por scanner</h3>
+      <div class="sub">% dos containers em que o scanner rodou com status ok (vs pull-failed, timeout, erro)</div>
+      <div class="canvas-box"><canvas id="chart-scanner-cov"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>distribuições</h2>
+  <div class="charts row2">
+    <div class="chart">
+      <h3>findings por container (histograma)</h3>
+      <div class="sub">quantos containers caem em cada faixa de nº de findings</div>
+      <div class="canvas-box"><canvas id="chart-hist"></canvas></div>
+    </div>
+    <div class="chart">
+      <h3>top-15 containers mais vulneráveis</h3>
+      <div class="sub">soma de findings críticos + altos</div>
+      <div class="canvas-box"><canvas id="chart-top-vuln"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>últimos alvos escaneados</h2>
+  <div class="recent-list" id="recent-list"></div>
+</section>
+
+<section>
+  <h2>top containers por exposição</h2>
+  <div class="tbl-toolbar">
+    <input id="q" placeholder="filtrar imagem: alpine, library/, nginx, @sha256:…" autocomplete="off">
+    <div class="count" id="count"></div>
+  </div>
+  <div class="tbl-wrap">
+    <table id="tbl">
+      <thead><tr>
+        <th class="num">#</th>
+        <th class="num">exposição</th>
+        <th>imagem</th>
+        <th class="num">findings</th>
+        <th class="num">syft</th>
+        <th class="num">trivy</th>
+        <th class="num">grype</th>
+        <th class="num">osv</th>
+        <th class="num">dockle</th>
+        <th class="num">trufflehog</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="pager">
+      <span id="page-info"></span>
+      <div>
+        <button id="prev">‹ anterior</button>
+        <button id="next">próxima ›</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>scans.anonshield.org · fonte: <a href="/api/v1/dit-live">/api/v1/dit-live</a> · <a href="https://github.com/ChimangoScan">ChimangoScan</a></footer>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>

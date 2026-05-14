@@ -1,0 +1,504 @@
+"""scans.anonshield.org — read-only API over the ChimangoScan/DITector pipeline state.
+
+Runs in a Docker container with `network: host` so it can hit the
+local Mongo/Neo4j/coord without any extra tunnels:
+
+
+  - coord HTTP          → http://127.0.0.1:8918/stats
+  - Mongo dockerhub_data → mongodb://127.0.0.1:27017                 (Stage I + II counts)
+  - Neo4j (later)       → bolt://127.0.0.1:7687                      (graph queries)
+
+Endpoints are public read-only. CORS is open for github.io. Each handler is
+cached in-process for SHORT_TTL/LONG_TTL seconds to avoid hammering the DB.
+
+Environment:
+  QUEUE_DB     default /data/ditector.db
+  MONGO_URI    default mongodb://127.0.0.1:27017
+  COORD_URL    default http://127.0.0.1:8918
+  CORS_ORIGINS default https://chimangoscan.github.io,http://localhost:5173
+  PORT         default 8920
+"""
+from __future__ import annotations
+import json
+import os
+import sqlite3
+import time
+from contextlib import asynccontextmanager
+from functools import lru_cache
+from typing import Optional
+
+import httpx
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+QUEUE_DB = os.environ.get("QUEUE_DB", "/data/ditector.db")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017")
+COORD_URL = os.environ.get("COORD_URL", "http://127.0.0.1:8918")
+CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "CORS_ORIGINS",
+    "https://chimangoscan.github.io,http://localhost:5173"
+).split(",") if o.strip()]
+PORT = int(os.environ.get("PORT", "8920"))
+
+SHORT_TTL = 30.0   # /stats, /recent, /top, /dit-live — coord under load, don't hammer it
+LONG_TTL = 60.0    # /pipeline (Mongo counts on 12M docs)
+
+_cache: dict[str, tuple[float, object]] = {}
+_cache_lock = __import__("threading").Lock()
+
+
+def _cached(key: str, ttl: float, fn, stale_ok: bool = True):
+    """Return cached value if fresh. On miss, call fn() and cache. Thread-safe.
+    stale_ok=True: if fn() raises, return stale value rather than propagating.
+    """
+    now = time.time()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and (now - hit[0]) < ttl:
+            return hit[1]
+    try:
+        val = fn()
+        with _cache_lock:
+            _cache[key] = (now, val)
+        return val
+    except Exception as exc:
+        with _cache_lock:
+            stale = _cache.get(key)
+        if stale_ok and stale:
+            return stale[1]
+        raise
+
+
+def _open_db() -> sqlite3.Connection:
+    # uri=True + immutable=0 + read-only avoids holding write locks against the coord
+    uri = f"file:{QUEUE_DB}?mode=ro"
+    c = sqlite3.connect(uri, uri=True, timeout=10.0, check_same_thread=False)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def _http_client() -> httpx.Client:
+    return httpx.Client(timeout=20.0)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # warm caches so the first hits are fast (containers snapshot can take 5–10 s)
+    import threading
+    def _prewarm():
+        try:
+            _stats_from_coord()
+        except Exception:
+            pass
+        try:
+            _cached("containers:full", LONG_TTL, _build_containers_snapshot)
+        except Exception as e:
+            print(f"prewarm containers failed: {e}", flush=True)
+    threading.Thread(target=_prewarm, daemon=True).start()
+    # also refresh containers cache every minute in the background
+    def _refresher():
+        tick = 0
+        while True:
+            time.sleep(60)
+            tick += 1
+            try:
+                if "containers:full" in _cache:
+                    t, v = _cache["containers:full"]
+                    if (time.time() - t) > 50:
+                        _cache["containers:full"] = (0, v)
+                _cached("containers:full", LONG_TTL, _build_containers_snapshot)
+            except Exception as e:
+                print(f"refresh containers failed: {e}", flush=True)
+            # PASSIVE WAL checkpoint every 5 min to keep WAL size manageable
+            if tick % 5 == 0:
+                try:
+                    c = sqlite3.connect(QUEUE_DB, timeout=5)
+                    c.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    c.close()
+                except Exception:
+                    pass
+    threading.Thread(target=_refresher, daemon=True).start()
+    yield
+
+
+app = FastAPI(
+    title="scans.anonshield.org",
+    description="Read-only API over the ChimangoScan / DITector pipeline state.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["*"],
+    max_age=600,
+)
+
+
+# ── handlers ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/v1/health")
+def health():
+    # cheap check on every dep
+    deps = {}
+    try:
+        c = _open_db()
+        c.execute("SELECT 1").fetchone()
+        c.close()
+        deps["queue_db"] = "ok"
+    except Exception as e:
+        deps["queue_db"] = f"err: {type(e).__name__}: {e}"
+    try:
+        with _http_client() as h:
+            r = h.get(f"{COORD_URL}/stats", timeout=5.0)
+            deps["coord"] = "ok" if r.status_code == 200 else f"http {r.status_code}"
+    except Exception as e:
+        deps["coord"] = f"err: {type(e).__name__}: {e}"
+    return {"status": "ok" if all(v == "ok" for v in deps.values()) else "degraded",
+            "deps": deps,
+            "ts": time.time()}
+
+
+def _stats_from_coord() -> dict:
+    """Authoritative queue counts come from the coord, not from SQLite directly
+    (the coord may have rows in flight that SQLite WAL hasn't checkpointed yet).
+    Short timeout so a busy coord doesn't block the whole endpoint; caller uses
+    stale_ok=True to return cached data on timeout."""
+    with _http_client() as h:
+        r = h.get(f"{COORD_URL}/stats", timeout=3.0)
+        r.raise_for_status()
+        return r.json()
+
+
+@app.get("/api/v1/queue/stats")
+def queue_stats():
+    """Counts by status + total findings, served from the coord."""
+    return _cached("stats", SHORT_TTL, _stats_from_coord, stale_ok=True)
+
+
+@app.get("/api/v1/queue/recent")
+def queue_recent(limit: int = Query(30, ge=1, le=200)):
+    """Most-recent N completed reports (image, findings count, finished_at)."""
+    def fn():
+        c = _open_db()
+        rows = c.execute(
+            """SELECT image, n_findings, finished_at
+               FROM reports
+               ORDER BY finished_at DESC
+               LIMIT ?""", (limit,)
+        ).fetchall()
+        c.close()
+        return [{"image": r["image"], "findings": r["n_findings"], "finished_at": r["finished_at"]}
+                for r in rows]
+    return _cached(f"recent:{limit}", SHORT_TTL, fn)
+
+
+@app.get("/api/v1/queue/top")
+def queue_top(
+    limit: int = Query(100, ge=1, le=5000),
+    status: Optional[str] = Query(None, description="filter: pending|done|running|skipped|failed"),
+    q: Optional[str] = Query(None, description="substring match on image (case-insensitive)"),
+):
+    """Top N jobs ordered by weight desc. Optional status + substring filters."""
+    def fn():
+        c = _open_db()
+        clauses = []
+        params: list = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if q:
+            clauses.append("LOWER(image) LIKE ?")
+            params.append(f"%{q.lower()}%")
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = (f"SELECT image, weight, status, attempts FROM jobs "
+               f"{where} ORDER BY weight DESC, id LIMIT ?")
+        params.append(limit)
+        rows = c.execute(sql, params).fetchall()
+        c.close()
+        return [dict(r) for r in rows]
+    key = f"top:{limit}:{status or 'all'}:{q or ''}"
+    return _cached(key, SHORT_TTL, fn)
+
+
+@app.get("/api/v1/queue/timeline")
+def queue_timeline(
+    bucket_minutes: int = Query(60, ge=5, le=1440, description="bucket size in minutes"),
+    hours: int = Query(48, ge=1, le=720, description="how many hours back to cover"),
+):
+    """Per-bucket count of completed reports — non-cumulative (delta per bucket).
+
+    Returns: [{"ts": "<bucket-start-ISO>", "done": N, "findings": F}, ...]
+    """
+    def fn():
+        c = _open_db()
+        secs = bucket_minutes * 60
+        since = time.time() - hours * 3600
+        # group by floor(finished_at / secs) * secs
+        rows = c.execute(
+            """SELECT CAST(finished_at / ? AS INTEGER) * ? AS bucket,
+                      COUNT(*) AS n_reports,
+                      COALESCE(SUM(n_findings), 0) AS n_findings
+               FROM reports
+               WHERE finished_at >= ?
+               GROUP BY bucket
+               ORDER BY bucket ASC""",
+            (secs, secs, since)
+        ).fetchall()
+        c.close()
+        import datetime as _dt
+        out = []
+        for r in rows:
+            ts = _dt.datetime.fromtimestamp(r["bucket"], _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            out.append({"ts": ts, "done": r["n_reports"], "findings": r["n_findings"]})
+        return {
+            "bucket_minutes": bucket_minutes,
+            "hours": hours,
+            "buckets": out,
+        }
+    key = f"timeline:{bucket_minutes}:{hours}"
+    return _cached(key, 120.0, fn)  # historical data — 2-min TTL is plenty
+
+
+def _mongo_counts() -> dict:
+    """Stage I (crawl) + Stage II (build) counts from Mongo. Fast — uses indexes."""
+    from pymongo import MongoClient
+    cli = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    db = cli["dockerhub_data"]
+    total = db.repositories_data.estimated_document_count()
+    unbuilt = db.repositories_data.count_documents({"graph_built_at": None})
+    built = total - unbuilt
+    keywords = db.crawler_keywords.estimated_document_count()
+    tags = db.tags_data.estimated_document_count()
+    images = db.images_data.estimated_document_count()
+    cli.close()
+    return {
+        "crawl": {
+            "keywords": keywords,
+            "repos_total": total,
+            "tags_total": tags,
+            "images_total": images,
+        },
+        "build": {
+            "repos_done": built,
+            "repos_pending": unbuilt,
+            "repos_pct": (built / total * 100) if total else 0,
+        },
+    }
+
+
+@app.get("/api/v1/pipeline")
+def pipeline():
+    """End-to-end pipeline status: crawl + build + scan in one payload."""
+    def fn():
+        m = _mongo_counts()
+        s = _stats_from_coord()
+        return {
+            "crawl": m["crawl"],
+            "build": m["build"],
+            "scan": {
+                "total": s.get("total"),
+                "pending": s.get("pending"),
+                "running": s.get("running"),
+                "done": s.get("done"),
+                "skipped": s.get("skipped"),
+                "failed": s.get("failed"),
+                "reports": s.get("reports"),
+                "findings": s.get("findings"),
+            },
+            "ts": time.time(),
+        }
+    return _cached("pipeline", LONG_TTL, fn)
+
+
+SCANNER_LIST = ["syft", "trivy", "grype", "osv", "dockle", "trufflehog"]
+SEV_KEYS = {"critical": "c", "high": "h", "medium": "m", "low": "l",
+            "info": "i", "informational": "i", "negligible": "i", "unknown": "u"}
+
+
+def _load_containers_from_static() -> dict | None:
+    """Read the pre-parsed dit-containers.json the cron writes every minute.
+    Way cheaper than re-parsing thousands of report JSONs in-process."""
+    try:
+        with open("/data/scanner-report/dit-containers.json", "rt") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _build_containers_snapshot() -> dict:
+    """Prefer the cron-generated static JSON; fall back to in-process reparse.
+    The static file is updated every minute; only on a cold start when the cron
+    hasn't run yet do we need to do the heavy lifting in-process."""
+    cached = _load_containers_from_static()
+    if cached and isinstance(cached.get("containers"), list):
+        cached.setdefault("n_total_scanned", len(cached["containers"]))
+        cached.setdefault("scanners", SCANNER_LIST)
+        return cached
+    # fallback: original parse-everything path (slow on large queues)
+    import datetime as _dt
+    c = _open_db()
+    n_total = c.execute("SELECT COUNT(*) FROM reports").fetchone()[0]
+    containers = []
+    for image, report_json, n_findings, finished_at in c.execute(
+            "SELECT image, report_json, n_findings, finished_at FROM reports"):
+        try:
+            r = json.loads(report_json)
+        except Exception:
+            continue
+        tgt = r.get("target") or {}
+        meta = tgt.get("meta") or {}
+        exposure = meta.get("exposure")
+        if exposure is None:
+            exposure = tgt.get("weight")
+        try:
+            exposure = float(exposure or 0)
+        except Exception:
+            exposure = 0.0
+        img = r.get("image") or tgt.get("image") or image
+        fa = r.get("finished_at")
+        if not fa and finished_at:
+            fa = _dt.datetime.fromtimestamp(float(finished_at), _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        merged = len(r.get("findings") or [])
+        by_scanner: dict = {}
+        for inv in (r.get("invocations") or []):
+            sc = inv.get("scanner")
+            if not sc:
+                continue
+            d = {"n": int(inv.get("findings") or 0),
+                 "c": 0, "h": 0, "m": 0, "l": 0, "i": 0, "u": 0,
+                 "status": inv.get("status") or ""}
+            for sev, cnt in (inv.get("findings_by_severity") or {}).items():
+                k = SEV_KEYS.get(str(sev).lower())
+                if k:
+                    try:
+                        d[k] += int(cnt or 0)
+                    except Exception:
+                        pass
+            by_scanner[sc] = d
+        if float(exposure).is_integer():
+            exposure = int(exposure)
+        containers.append({
+            "image": img,
+            "exposure": exposure,
+            "finished_at": fa,
+            "merged": merged,
+            "by_scanner": by_scanner,
+        })
+    c.close()
+    containers.sort(key=lambda x: x["exposure"], reverse=True)
+    for i, ct in enumerate(containers):
+        ct["rank"] = i + 1
+    return {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "n_total_scanned": int(n_total),
+        "scanners": SCANNER_LIST,
+        "containers": containers,
+    }
+
+
+@app.get("/api/v1/containers")
+def containers(
+    limit: int = Query(3000, ge=1, le=100000),
+    offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, description="substring filter on image"),
+):
+    """Every scanned container with per-scanner severity counts. No artificial cap."""
+    def fn():
+        return _cached("containers:full", LONG_TTL, _build_containers_snapshot)
+    snap = fn()
+    items = snap["containers"]
+    if q:
+        ql = q.lower()
+        items = [c for c in items if ql in c["image"].lower()]
+    n_shown = len(items)
+    items = items[offset:offset + limit]
+    return {
+        "generated_at": snap["generated_at"],
+        "n_total_scanned": snap["n_total_scanned"],
+        "n_shown": n_shown,
+        "offset": offset,
+        "limit": limit,
+        "scanners": snap["scanners"],
+        "containers": items,
+    }
+
+
+def _machines_snapshot() -> dict:
+    """Per-host state by parsing the cron-generated dit-live.json (it has
+    workers_alive + load + ram via probe). Cheap to read; falls back to
+    nulls if the file isn't there."""
+    out = {"hosts": [], "ts": time.time()}
+    try:
+        with open("/data/scanner-report/dit-live.json", "rt") as f:
+            d = json.load(f)
+            for m in d.get("machines") or []:
+                out["hosts"].append({
+                    "host": m.get("host"),
+                    "role": m.get("role"),
+                    "workers_alive": m.get("workers_alive"),
+                    "online": m.get("online"),
+                    "load1": m.get("load"),
+                    "ram_avail_mb": m.get("ram_avail_mb"),
+                })
+    except Exception:
+        pass
+    return out
+
+
+@app.get("/api/v1/machines")
+def machines():
+    """List of worker hosts and their last-known state."""
+    return _cached("machines", SHORT_TTL, _machines_snapshot)
+
+
+@app.get("/api/v1/dit-live")
+def dit_live():
+    """Drop-in replacement for scanner-report/dit-live.json.
+
+    Returns the same shape the static page consumes today: queue counts +
+    machines + recent + history fields. History comes from the existing JSON
+    file (which the cron is still updating until we replace it); everything
+    else is fresh.
+    """
+    def fn():
+        stats = _cached("stats", SHORT_TTL, _stats_from_coord, stale_ok=True)
+        recent = queue_recent(limit=30) if callable(queue_recent) else []
+        # piggyback on the cron-generated history while we transition; the file
+        # is mounted via volume below.
+        history = []
+        try:
+            with open("/data/scanner-report/dit-live.json", "rt") as f:
+                prev = json.load(f)
+                history = prev.get("history", [])[-30:]
+        except Exception:
+            history = []
+        return {
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "queue": stats,
+            "recent": recent,
+            "history": history,
+            "rate_per_min": _estimate_rate(history),
+        }
+    return _cached("dit-live", SHORT_TTL, fn)
+
+
+def _estimate_rate(history: list) -> Optional[float]:
+    if len(history) < 2:
+        return None
+    h = history[-8:]
+    first, last = h[0], h[-1]
+    try:
+        t0 = time.mktime(time.strptime(first["ts"], "%Y-%m-%dT%H:%M:%SZ"))
+        t1 = time.mktime(time.strptime(last["ts"], "%Y-%m-%dT%H:%M:%SZ"))
+        dt_min = (t1 - t0) / 60.0
+        d_done = last["done"] - first["done"]
+        if dt_min < 1 or d_done < 0:
+            return None
+        return round(d_done / dt_min, 2)
+    except Exception:
+        return None

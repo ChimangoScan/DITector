@@ -1,0 +1,65 @@
+###############################################################################
+# Instalação do Docker CE em <your-host> — espelha o setup atual do <your-host-2>
+# Alvo: Ubuntu 24.04.4 LTS (noble), x86_64
+# Origem: download.docker.com (repositório oficial do Docker, NÃO docker.io do Ubuntu)
+#
+# Rode os blocos como <your-user> (precisa sudo onde indicado).
+# Cada bloco é independente e pode ser reexecutado se algum passo falhar.
+###############################################################################
+
+
+# ─── 1. Limpeza: remover qualquer resquício antigo (não falha se nada existir) ──
+sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-doc docker-compose docker-compose-v2 podman-docker 2>/dev/null
+sudo rm -rf /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.list.save /etc/apt/sources.list.d/docker.list.distUpgrade
+sudo rm -f /etc/apt/keyrings/docker.asc /etc/apt/keyrings/docker.gpg
+
+
+# ─── 2. Pré-requisitos ─────────────────────────────────────────────────────────
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+
+
+# ─── 3. Chave GPG oficial do Docker ────────────────────────────────────────────
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+
+# ─── 4. Adicionar repositório oficial do Docker ────────────────────────────────
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+
+
+# ─── 5. Instalar Docker CE + plugins (mesmas versões do <your-host-2>) ──────────────────
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+
+# ─── 6. Habilitar e iniciar o serviço ──────────────────────────────────────────
+sudo systemctl enable --now docker
+
+
+# ─── 7. Permitir que o usuário <your-user> use docker sem sudo ──────────────────
+sudo usermod -aG docker <your-user>
+# Importante: faça logout e login novamente (ou rode `newgrp docker`) para aplicar
+
+
+# ─── 8. Verificação ────────────────────────────────────────────────────────────
+docker --version
+docker compose version
+sudo systemctl status docker --no-pager | head -5
+docker run --rm hello-world
+
+
+###############################################################################
+# Após esses passos, <your-host> estará igual ao <your-host-2>.
+# Os dados antigos do Mongo e Neo4j (em ~/DITector_research/mongo_data_secure
+# e neo4j_data, 11G + 32G) continuam intactos no host. Para subir a stack:
+#
+#   cd /home/<your-user>/DITector_research
+#   docker-compose --profile db up -d mongodb neo4j
+#   make start-build
+#
+# Depois reinicie os builders em <your-host-2> e <worker-host>:
+#   ssh <your-host-2> 'cd /home/<your-user>/DITector_research && make start-build'
+#   ssh <worker-host>  'cd /home/<your-user>/DITector_research && make start-build'
+###############################################################################
