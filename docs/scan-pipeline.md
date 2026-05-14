@@ -4,22 +4,23 @@
 
 ```
 STAGE I — Crawler (Go)
-  └─ Mongo dockerhub_data
-       repositories_data  12.716.568 repos indexados
-       tags_data           5.603.957 tags
-       images_data         6.500.000+ imagens (digest + metadados)
-       crawler_keywords    2.000.000+ keywords usadas na busca
+  └─ Descobre repositórios via busca por prefixo na Docker Hub Search API
+  └─ Mongo dockerhub_data:
+       repositories_data  12.716.568 repos indexados   ← escrito pelo crawler
+       crawler_keywords    2.000.000+ prefixos buscados ← estado do crawler
 
 STAGE II — Builder (Go)
-  └─ Lê repositories_data, faz docker pull, extrai histórico de layers
-  └─ Constrói grafo IS_BASE_OF no Neo4j: (Layer)-[:IS_BASE_OF]->(Layer)
+  └─ Para cada repo em repositories_data:
+       busca tags na Docker Hub API → escreve tags_data (5.603.957 tags)
+       busca manifests por digest   → escreve images_data (6.500.000+ imagens)
+       puxa a imagem, extrai layers → constrói grafo Neo4j IS_BASE_OF
   └─ Status (2026-05-14): 4.961.614 repos buildados (39% de 12,7 M)
-       ~50 M edges no grafo (relações transitivas incluídas)
+       ~50 M edges no grafo (inclui relações transitivas)
        taxa: ~207 repos/min → ETA ~30 dias para 100%
 
 STAGE III — Scanner distribuído (ChimangoScan)
   └─ Fila SQLite (ditector.db) com ~504 k jobs rankeados por exposure
-  └─ Workers em gpu1 + a9 + l01..l09 consomem da mesma fila via HTTP
+  └─ Workers distribuídos em múltiplos hosts consomem da mesma fila via HTTP
   └─ 6 scanners estáticos por imagem: syft, trivy, grype, osv, dockle, trufflehog
 ```
 
@@ -45,6 +46,74 @@ Token plateau: se um prefixo com "-" ou "_" retorna 10k mas 0 repos novos
 ```
 
 **Resultado**: a travessia cobre o espaço de nomes do Docker Hub sistematicamente, sem depender de links entre repos. A `crawler_keywords` collection no Mongo armazena o estado de cada prefixo (`pending` / `processing` / `done`), tornando o crawler **retomável** após paradas.
+
+---
+
+## Stage II — Builder e grafo IS_BASE_OF
+
+Para cada repo em `repositories_data`, o builder Go:
+
+1. Consulta a Docker Hub API e salva **tags** (`tags_data`) e **manifests/digests** (`images_data`)
+2. Faz `docker pull` da imagem e extrai o histórico de layers (cada layer tem um digest)
+3. Para cada layer, calcula `id = sha256(parent_id + sha256(layer_digest))` e insere a relação `(Layer)-[:IS_BASE_OF]->(Layer)` no Neo4j
+4. Ao terminar, marca `repositories_data.graph_built_at`
+
+O grafo resultante é uma **floresta de out-trees**: cada Layer tem no máximo um pai (o ID é determinístico dado o par parent+digest), com `~50 M edges` quando completo — inclui relações transitivas (se A é base de B que é base de C, tanto `A→B` quanto `B→C` estão no grafo).
+
+---
+
+## Cálculo de exposure — como a fila do Stage III é ordenada
+
+O Stage III não escaneia imagens em ordem aleatória. A fila é rankeada por **exposure**: imagens que são base de muitas outras têm prioridade porque uma vulnerabilidade nelas afeta toda a cadeia downstream.
+
+### Fórmula
+
+$$
+E(I) = p(R_I) + \sum_{N \,\in\, D(L_I)} \sum_{r \,\in\, \mathrm{img}(N)} p(R_r)
+$$
+
+$$
+W(I) = \sum_{N \,\in\, D(L_I)} |\,\mathrm{img}(N)\,|
+$$
+
+Onde:
+- $E(I)$ — exposure da imagem $I$ (métrica de prioridade)
+- $p(R)$ — pulls históricos do repositório $R$ no Docker Hub
+- $L_I$ — top layer de $I$ no grafo IS_BASE_OF
+- $D(L_I)$ — descendentes **estritos** de $L_I$ (exclui o próprio $L_I$)
+- $\mathrm{img}(N)$ — refs de imagens cujo top layer é o nó $N$
+- $W(I)$ — dependency weight: nº de imagens downstream distintas
+
+**Exemplo:** `alpine:latest` tem $p = 10$ bi de pulls próprios e 91 bi de pulls acumulados em tudo que herda dele → $E = 101$ bi → primeiro da fila.
+
+### Algoritmo (subtree sums bottom-up, O(n))
+
+```
+1. Dump Mongo → repo_pull.tsv.gz  (ns, name, pull_count)
+2. Dump Neo4j → edges.tsv.gz      (parent_id, child_id, ~50 M linhas)
+               toplayers.jsonl.gz (layer_id, images[])
+
+3. Arrays densos indexados pelo ID interno Neo4j:
+   parent[i] = pai do nó i  (-1 se raiz)
+   sub_p[i]  = soma pull_count no subtree   (seed: sum p(R) das refs de i)
+   sub_w[i]  = nº imagens no subtree        (seed: len(images[i]))
+
+4. Kahn bottom-up — folhas primeiro:
+   sub_p[pai] += sub_p[filho]
+   sub_w[pai] += sub_w[filho]
+
+5. Para cada repo:
+   downstream_pull_sum = sub_p[L] - self_p[L]
+   dependency_weight   = sub_w[L] - self_w[L]
+   exposure            = pull_count + downstream_pull_sum
+```
+
+O ranker gera um JSONL por repo ordenado por exposure desc e o daemon `exposure-updater` faz UPSERT na fila a cada 6 h:
+
+```sql
+ON CONFLICT(image) DO UPDATE SET weight = excluded.weight
+WHERE status = 'pending'   -- nunca sobrescreve done/running
+```
 
 ---
 
@@ -487,81 +556,6 @@ Coordinator (ditector.db — SQLite):
 ```
 
 **Nota**: com `remove_image_after: true`, a imagem Docker e o tarball são removidos após o scan. Os arquivos raw em `out/<slug>/` permanecem. O `report_json` na coluna SQLite é a cópia canônica usada pelo dashboard e pela API.
-
----
-
----
-
-## Cálculo de exposure — como a fila é priorizada
-
-### Fórmula
-
-$$
-\text{exposure}(I) = \text{pull\_count}(\text{repo}(I))
-  + \sum_{N \;\in\; \text{desc}(L_I)} \;\sum_{r \;\in\; \text{images}(N)} \text{pull\_count}(\text{repo}(r))
-$$
-
-$$
-\text{dependency\_weight}(I) = \sum_{N \;\in\; \text{desc}(L_I)} |\text{images}(N)|
-$$
-
-Onde:
-- $L_I$ = top layer da imagem $I$ no grafo IS_BASE_OF
-- $\text{desc}(L_I)$ = conjunto de todos os descendentes **estritos** de $L_I$ (exclui o próprio $L_I$)
-- $\text{images}(N)$ = conjunto de refs cujo top layer é o nó $N$
-- $\text{pull\_count}(\text{repo})$ = pulls históricos do repositório no Docker Hub
-
-Em linguagem natural:
-
-- **`pull_count`** — pulls históricos do próprio repo (Mongo `repositories_data`)
-- **`downstream_pull_sum`** — soma dos `pull_count` de **todos** os repos que herdam este como base, direta ou transitivamente (grafo Neo4j IS_BASE_OF)
-
-**Por quê**: `alpine:latest` tem 10 bi de pulls próprios, mas é a base de milhões de imagens que somam mais 91 bi de pulls downstream → exposure 101 bi. Uma CVE no alpine expõe toda essa cadeia.
-
-### Grafo IS_BASE_OF
-
-O Stage II constrói `(Layer)-[:IS_BASE_OF]->(Layer)` no Neo4j. Cada Layer tem **no máximo um pai** (o ID é `sha256(parent_id + sha256(layer.digest))` — determinístico), então o grafo é uma **floresta de out-trees**. Cada nó carrega `images[]` — lista das refs cujo top layer é aquele nó.
-
-### Algoritmo — subtree sums bottom-up O(n)
-
-```
-1. Dump Mongo → repo_pull.tsv.gz (ns, name, pull_count) + tags.tsv.gz
-2. Dump Neo4j → edges.tsv.gz (parent_id, child_id, 50 M linhas) + toplayers.jsonl.gz
-
-3. Carrega edges em arrays densos indexados pelo ID interno Neo4j:
-   parent[i] = pai do nó i  (-1 se raiz)
-   sub_w[i]  = nº imagens no subtree (seed: len(images[i]))
-   sub_p[i]  = soma pull_count no subtree (seed: sum pull_count das refs de i)
-
-4. Kahn bottom-up (folhas primeiro):
-   sub_w[pai] += sub_w[filho]
-   sub_p[pai] += sub_p[filho]
-
-5. Para cada repo:
-   downstream_pull_sum = sub_p[top_layer] - self_p[top_layer]
-   dependency_weight   = sub_w[top_layer] - self_w[top_layer]
-   exposure            = pull_count + downstream_pull_sum
-```
-
-### Output e UPSERT
-
-O ranker gera um JSONL com um entry por repo, ordenado por `exposure` desc:
-
-```json
-{"repository_namespace":"library","repository_name":"alpine",
- "tag_name":"latest","image_digest":"sha256:1775bebec...",
- "pull_count":10123456789,"dependency_weight":4821033,
- "downstream_pull_sum":91234567890,"exposure":101358024679}
-```
-
-O daemon `exposure-updater` (loop de 6 h) faz UPSERT na fila:
-
-```sql
-ON CONFLICT(image) DO UPDATE SET weight = excluded.weight
-WHERE status = 'pending'   -- nunca sobrescreve done/running
-```
-
-Depois trim: mantém top-500k pending por exposure. Ciclo completo: ~2,5 h (dominado pelo dump dos 50 M edges do Neo4j).
 
 ---
 
