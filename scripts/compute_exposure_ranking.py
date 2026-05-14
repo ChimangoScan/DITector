@@ -24,11 +24,13 @@ import os
 import sys
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017")
 WORKDIR = os.environ.get("WORKDIR", os.path.expanduser("~/scanners/data/exposure_work"))
 OUT_PATH = os.environ.get("OUT_PATH", os.path.expanduser("~/scanners/data/ditector_exposure_ranked.jsonl"))
+RANKER_SHARDS = int(os.environ.get("RANKER_SHARDS", "4"))
 
 os.makedirs(WORKDIR, exist_ok=True)
 
@@ -104,54 +106,164 @@ def dump_mongo():
 # ---------------------------------------------------------------------------
 # Phase 2: Neo4j stream
 # ---------------------------------------------------------------------------
+def _id_bounds(drv):
+    """Return (min_id, max_id) over Layer internal ids; (0, -1) if empty."""
+    with drv.session() as s:
+        rec = s.run("MATCH (l:Layer) RETURN min(id(l)) AS lo, max(id(l)) AS hi").single()
+        lo = rec["lo"]; hi = rec["hi"]
+    if lo is None or hi is None:
+        return 0, -1
+    return int(lo), int(hi)
+
+
+def _shard_ranges(lo, hi, n):
+    """Inclusive lower / exclusive upper bounds split into n contiguous shards over [lo, hi+1)."""
+    if hi < lo:
+        return []
+    total = hi - lo + 1
+    step = (total + n - 1) // n
+    out = []
+    s = lo
+    while s <= hi:
+        e = min(s + step, hi + 1)
+        out.append((s, e))
+        s = e
+    return out
+
+
+def _stream_edges_shard(drv, idx, n, lo, hi):
+    """Stream IS_BASE_OF edges whose source id is in [lo, hi) using a fresh session.
+
+    Returns (idx, list[bytes_line], elapsed_seconds, count).
+    Lines are pre-formatted as bytes so the main thread can just write them in order.
+    """
+    t = time.time()
+    buf = []
+    append = buf.append
+    with drv.session() as s:
+        res = s.run(
+            "MATCH (a:Layer)-[:IS_BASE_OF]->(b:Layer) "
+            "WHERE id(a) >= $lo AND id(a) < $hi "
+            "RETURN id(a) AS p, id(b) AS c",
+            lo=lo, hi=hi,
+        )
+        for rec in res:
+            p = rec["p"]; c = rec["c"]
+            if p is None or c is None:
+                continue
+            append("%d\t%d\n" % (p, c))
+    dt = time.time() - t
+    n_lines = len(buf)
+    log("  shard %d/%d edges done in %.1fs, edges=%d (id range [%d,%d))" % (idx + 1, n, dt, n_lines, lo, hi))
+    return idx, buf, dt, n_lines
+
+
+def _stream_toplayers_shard(drv, idx, n, lo, hi):
+    """Stream Layer nodes with non-empty images whose id is in [lo, hi) using a fresh session."""
+    t = time.time()
+    buf = []
+    append = buf.append
+    with drv.session() as s:
+        res = s.run(
+            "MATCH (l:Layer) "
+            "WHERE id(l) >= $lo AND id(l) < $hi "
+            "AND l.images IS NOT NULL AND size(l.images) > 0 "
+            "RETURN id(l) AS id, l.images AS images",
+            lo=lo, hi=hi,
+        )
+        for rec in res:
+            lid = rec["id"]; imgs = rec["images"]
+            if lid is None or not imgs:
+                continue
+            append("%d\t%s\n" % (lid, json.dumps(imgs, separators=(",", ":"))))
+    dt = time.time() - t
+    n_lines = len(buf)
+    log("  shard %d/%d toplayers done in %.1fs, nodes=%d (id range [%d,%d))" % (idx + 1, n, dt, n_lines, lo, hi))
+    return idx, buf, dt, n_lines
+
+
 def dump_neo4j():
-    """Stream edges and top-layers using Neo4j *internal* node ids id(n) (no `id` property dereference).
+    """Stream edges and top-layers using Neo4j *internal* node ids id(n) in parallel shards.
 
     The builder only inserts nodes (never deletes), so internal ids are stable and roughly dense; we use
     them directly as array indices. The edge query touches only the relationship store -> fast even with a
-    cold page cache (no random property reads). Array sizes are derived later from the max id seen in the dumps.
+    cold page cache. Array sizes are derived later from the max id seen in the dumps.
+
+    Parallelization: shard by id(source-Layer) range. Each shard opens a fresh driver session in its own
+    thread; results are collected in shard-index order and written sequentially to the gz file. The Neo4j
+    server-side query plan can use NodeByIdSeek bounds + relationship store walk per shard, so N sessions
+    run independently against the page cache. Concatenation order does NOT matter (Phase 3 reduces edges
+    and toplayers into associative structures), but we keep shard order for deterministic file content.
     """
     from neo4j import GraphDatabase
-    drv = GraphDatabase.driver(NEO4J_URI, auth=None)
+    drv = GraphDatabase.driver(NEO4J_URI, auth=None, max_connection_pool_size=max(8, RANKER_SHARDS * 2))
 
-    if not (os.path.exists(EDGES_GZ) and os.path.getsize(EDGES_GZ) > 0):
-        log("streaming IS_BASE_OF edges (by internal id) ...")
+    edges_needed = not (os.path.exists(EDGES_GZ) and os.path.getsize(EDGES_GZ) > 0)
+    top_needed = not (os.path.exists(TOPLAYERS_GZ) and os.path.getsize(TOPLAYERS_GZ) > 0)
+
+    if not (edges_needed or top_needed):
+        log("edges + toplayers dumps already present, skipping Phase 2")
+        drv.close()
+        return
+
+    lo, hi = _id_bounds(drv)
+    n_layers_q_t = time.time()
+    with drv.session() as s:
+        n_layers = s.run("MATCH (l:Layer) RETURN count(l) AS n").single()["n"]
+    log("PHASE 2: layers=%d  id range=[%d,%d]  shards=%d  bounds_lookup=%.1fs"
+        % (n_layers, lo, hi, RANKER_SHARDS, time.time() - n_layers_q_t))
+    shards = _shard_ranges(lo, hi, RANKER_SHARDS)
+    if not shards:
+        log("PHASE 2: no Layer nodes found; nothing to stream")
+        drv.close()
+        return
+
+    if edges_needed:
+        log("PHASE 2: streaming IS_BASE_OF edges across %d shards ..." % len(shards))
+        t0 = time.time()
+        results = [None] * len(shards)
+        with ThreadPoolExecutor(max_workers=len(shards)) as ex:
+            futs = [ex.submit(_stream_edges_shard, drv, i, len(shards), s, e)
+                    for i, (s, e) in enumerate(shards)]
+            for fut in as_completed(futs):
+                idx, buf, _dt, _nl = fut.result()
+                results[idx] = buf
         tmp = EDGES_GZ + ".tmp"
-        n = 0
-        with drv.session() as s, gzip.open(tmp, "wt") as f:
-            res = s.run("MATCH (a:Layer)-[:IS_BASE_OF]->(b:Layer) RETURN id(a) AS p, id(b) AS c")
-            for rec in res:
-                p = rec["p"]; c = rec["c"]
-                if p is None or c is None:
-                    continue
-                f.write("%d\t%d\n" % (p, c))
-                n += 1
-                if n % 2_000_000 == 0:
-                    log("  edges:", n)
+        total = 0
+        log("PHASE 2.5: concatenating edge shards -> %s" % EDGES_GZ)
+        with gzip.open(tmp, "wt") as f:
+            for buf in results:
+                if buf:
+                    f.writelines(buf)
+                    total += len(buf)
         os.replace(tmp, EDGES_GZ)
-        log("edges done:", n)
+        log("edges done: %d (wall %.1fs)" % (total, time.time() - t0))
     else:
         log("edges dump already present, skipping")
 
-    if not (os.path.exists(TOPLAYERS_GZ) and os.path.getsize(TOPLAYERS_GZ) > 0):
-        log("streaming top layers (size(images)>0, by internal id) ...")
+    if top_needed:
+        log("PHASE 2: streaming top layers across %d shards ..." % len(shards))
+        t0 = time.time()
+        results = [None] * len(shards)
+        with ThreadPoolExecutor(max_workers=len(shards)) as ex:
+            futs = [ex.submit(_stream_toplayers_shard, drv, i, len(shards), s, e)
+                    for i, (s, e) in enumerate(shards)]
+            for fut in as_completed(futs):
+                idx, buf, _dt, _nl = fut.result()
+                results[idx] = buf
         tmp = TOPLAYERS_GZ + ".tmp"
-        n = 0
-        with drv.session() as s, gzip.open(tmp, "wt") as f:
-            res = s.run("MATCH (l:Layer) WHERE l.images IS NOT NULL AND size(l.images) > 0 "
-                        "RETURN id(l) AS id, l.images AS images")
-            for rec in res:
-                lid = rec["id"]; imgs = rec["images"]
-                if lid is None or not imgs:
-                    continue
-                f.write("%d\t%s\n" % (lid, json.dumps(imgs, separators=(",", ":"))))
-                n += 1
-                if n % 500_000 == 0:
-                    log("  top layers:", n)
+        total = 0
+        log("PHASE 2.5: concatenating toplayer shards -> %s" % TOPLAYERS_GZ)
+        with gzip.open(tmp, "wt") as f:
+            for buf in results:
+                if buf:
+                    f.writelines(buf)
+                    total += len(buf)
         os.replace(tmp, TOPLAYERS_GZ)
-        log("top layers done:", n)
+        log("top layers done: %d (wall %.1fs)" % (total, time.time() - t0))
     else:
         log("toplayers dump already present, skipping")
+
     drv.close()
 
 
@@ -372,9 +484,13 @@ def main():
     # Imagens com o MESMO top-layer node têm conteúdo idêntico (mesma pilha de layers).
     # Escanear todas é redundante. Para cada nó, mantemos apenas o repo com maior pull_count
     # (o mais "canônico" do conteúdo). Rebrands com 0 pulls não entram na fila.
-    log("PHASE 4: dedup por layer node (mantém repo mais popular por conteúdo idêntico)")
-    layer_best_ref = {}   # ni -> (ref, pull_count)
+    # Repos com poucos pulls que "herdam" downstream de nós base (ex: alpine) não devem
+    # aparecer como representantes canônicos — só confundem o ranking com test-pushes.
+    MIN_CANONICAL_PULLS = int(os.environ.get("MIN_CANONICAL_PULLS", "1000"))
+    log(f"PHASE 4: dedup por layer node (mantém repo mais popular por conteúdo idêntico; min_pulls={MIN_CANONICAL_PULLS})")
+    layer_best_ref = {}   # ni -> ref
     n_deduplicated = 0
+    n_skipped_low_pull = 0
     for ni, imgs in top_images.items():
         best_ref, best_pc = None, -1
         for ref in imgs:
@@ -383,10 +499,12 @@ def main():
             if pc > best_pc:
                 best_pc = pc
                 best_ref = ref
-        if best_ref:
+        if best_ref and best_pc >= MIN_CANONICAL_PULLS:
             layer_best_ref[ni] = best_ref
-            n_deduplicated += len(imgs) - 1  # quantos foram descartados
-    log(f"  layer nodes: {len(layer_best_ref)}  refs descartados por conteúdo duplicado: {n_deduplicated}")
+            n_deduplicated += len(imgs) - 1
+        elif best_ref:
+            n_skipped_low_pull += 1
+    log(f"  layer nodes kept: {len(layer_best_ref)}  refs descartados por conteúdo duplicado: {n_deduplicated}  nós ignorados (winner <{MIN_CANONICAL_PULLS} pulls): {n_skipped_low_pull}")
 
     # ---- rank ----
     log("PHASE 4: rank images")

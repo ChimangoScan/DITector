@@ -372,9 +372,13 @@ def main():
     # Imagens com o MESMO top-layer node têm conteúdo idêntico (mesma pilha de layers).
     # Escanear todas é redundante. Para cada nó, mantemos apenas o repo com maior pull_count
     # (o mais "canônico" do conteúdo). Rebrands com 0 pulls não entram na fila.
-    log("PHASE 4: dedup por layer node (mantém repo mais popular por conteúdo idêntico)")
-    layer_best_ref = {}   # ni -> (ref, pull_count)
+    # Repos com poucos pulls que "herdam" downstream de nós base (ex: alpine) não devem
+    # aparecer como representantes canônicos — só confundem o ranking com test-pushes.
+    MIN_CANONICAL_PULLS = int(os.environ.get("MIN_CANONICAL_PULLS", "1000"))
+    log(f"PHASE 4: dedup por layer node (mantém repo mais popular por conteúdo idêntico; min_pulls={MIN_CANONICAL_PULLS})")
+    layer_best_ref = {}   # ni -> ref
     n_deduplicated = 0
+    n_skipped_low_pull = 0
     for ni, imgs in top_images.items():
         best_ref, best_pc = None, -1
         for ref in imgs:
@@ -383,21 +387,25 @@ def main():
             if pc > best_pc:
                 best_pc = pc
                 best_ref = ref
-        if best_ref:
+        if best_ref and best_pc >= MIN_CANONICAL_PULLS:
             layer_best_ref[ni] = best_ref
-            n_deduplicated += len(imgs) - 1  # quantos foram descartados
-    log(f"  layer nodes: {len(layer_best_ref)}  refs descartados por conteúdo duplicado: {n_deduplicated}")
+            n_deduplicated += len(imgs) - 1
+        elif best_ref:
+            n_skipped_low_pull += 1
+    log(f"  layer nodes kept: {len(layer_best_ref)}  refs descartados por conteúdo duplicado: {n_deduplicated}  nós ignorados (winner <{MIN_CANONICAL_PULLS} pulls): {n_skipped_low_pull}")
 
     # ---- rank ----
     log("PHASE 4: rank images")
     best = {}   # "ns\x00repo" -> (chosen_dict, matched_bool)
     n_refs = 0
     for ni, ref in layer_best_ref.items():
-        dps = sub_p[ni] - self_p[ni]
-        dw = sub_w[ni] - self_w[ni]
         ns, repo, tag, digest = ref_parsed[ref]
         key = ns + KEYSEP + repo
         pc = repo_pull.get(key, 0)
+        # usar apenas pc do best_ref — self_p[ni] soma TODOS os repos no nó (inclui rebrands)
+        # e distorce dps de repos com poucos pulls que compartilham nó com algo gigante
+        dps = sub_p[ni] - pc
+        dw = sub_w[ni] - self_w[ni]
         exposure = pc + dps
         rt = repr_tag(key)
         matched = (tag == rt)
