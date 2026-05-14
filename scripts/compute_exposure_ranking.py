@@ -393,11 +393,13 @@ def main():
     best = {}   # "ns\x00repo" -> (chosen_dict, matched_bool)
     n_refs = 0
     for ni, ref in layer_best_ref.items():
-        dps = sub_p[ni] - self_p[ni]
-        dw = sub_w[ni] - self_w[ni]
         ns, repo, tag, digest = ref_parsed[ref]
         key = ns + KEYSEP + repo
         pc = repo_pull.get(key, 0)
+        # usar apenas pc do best_ref — self_p[ni] soma TODOS os repos no nó (inclui rebrands)
+        # e distorce dps de repos com poucos pulls que compartilham nó com algo gigante
+        dps = sub_p[ni] - pc
+        dw = sub_w[ni] - self_w[ni]
         exposure = pc + dps
         rt = repr_tag(key)
         matched = (tag == rt)
