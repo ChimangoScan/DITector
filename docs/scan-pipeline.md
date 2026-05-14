@@ -165,6 +165,26 @@ docker save → /cache/tars/<slug>.tar      ← produzido UMA vez, compartilhado
 
 ---
 
+## Os 6 scanners — diferenças e complementaridade
+
+| Scanner | O que detecta | Base de dados | Categorias | Overlap |
+|---------|--------------|---------------|------------|---------|
+| **Syft** | Inventário de pacotes (SBOM) — lista o que está instalado, não detecta vulns | — | `sbom-component` (info) | Único no papel |
+| **Trivy** | CVEs em pacotes SO + libs + segredos em arquivos + misconfig de imagem | NVD + OSS-Index + Trivy Advisories | `pkg-vuln`, `secret`, `image-config` | Overlap alto com Grype/OSV |
+| **Grype** | CVEs em pacotes SO + libs de linguagem | Anchore VulnDB (NVD + GitHub Advisory + mais) | `pkg-vuln` | Overlap alto com Trivy |
+| **OSV** | CVEs em libs de linguagem (npm, PyPI, Go, Rust, Maven…) | Google OSV Database | `pkg-vuln` | Overlap parcial com Trivy/Grype |
+| **Dockle** | Má configuração da imagem (CIS Docker Benchmark) — não é CVE | CIS checks internos | `image-config` | Único no papel |
+| **TruffleHog** | Segredos e credenciais hardcoded na imagem (chaves, tokens, passwords) | 700+ detectores proprietários | `secret` | Parcial com Trivy |
+
+**Por que rodar Trivy + Grype + OSV juntos se detectam CVEs?**
+Cada um cobre CVEs que os outros não têm: Trivy é o mais abrangente (SO + linguagem + secrets + misconfig), Grype usa a Anchore VulnDB com fontes adicionais e às vezes severidade diferente, OSV foca em libs de linguagem com o banco do Google atualizado em tempo real. O merge posterior consolida os overlaps — se os três detectam o mesmo CVE no mesmo pacote, vira um finding único com `"scanners": ["trivy", "grype", "osv"]`.
+
+**Os dois únicos no papel:**
+- **Syft** — não detecta vuln, só SBOM. Inventaria exatamente o que está na imagem.
+- **Dockle** — o único que olha para a *configuração da imagem* (root user, ADD vs COPY, healthcheck ausente, segredos em ENV) em vez do conteúdo dos pacotes.
+
+---
+
 ## Os 6 scanners — o que produzem e o que salvamos
 
 ### 1. Syft
