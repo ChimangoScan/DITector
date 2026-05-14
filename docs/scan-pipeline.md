@@ -3,23 +3,28 @@
 ## Visão geral em 3 estágios
 
 ```
-STAGE I — Crawler (Go)
+STAGE I — Crawler (Go)                                       [COMPLETO]
   └─ Descobre repositórios via busca por prefixo na Docker Hub Search API
   └─ Mongo dockerhub_data:
-       repositories_data  12.716.568 repos indexados   ← escrito pelo crawler
-       crawler_keywords    2.000.000+ prefixos buscados ← estado do crawler
+       repositories_data   12.716.568 repos indexados   ← escrito pelo crawler
+       crawler_keywords     2.051.801 prefixos buscados  ← estado do crawler
 
-STAGE II — Builder (Go)
+STAGE II — Builder (Go)                                      [EM ANDAMENTO]
   └─ Para cada repo em repositories_data:
-       busca tags na Docker Hub API → escreve tags_data (5.603.957 tags)
-       busca manifests por digest   → escreve images_data (6.500.000+ imagens)
+       busca tags na Docker Hub API → escreve tags_data  (5.732.556 tags)
+       busca manifests por digest   → escreve images_data (6.709.152 imagens)
        puxa a imagem, extrai layers → constrói grafo Neo4j IS_BASE_OF
-  └─ Status (2026-05-14): 4.961.614 repos buildados (39% de 12,7 M)
+  └─ Progresso (2026-05-14):  4.964.236 / 12.716.568 repos buildados (39%)
        ~50 M edges no grafo (inclui relações transitivas)
        taxa: ~207 repos/min → ETA ~30 dias para 100%
 
-STAGE III — Scanner distribuído (ChimangoScan)
-  └─ Fila SQLite (ditector.db) com ~504 k jobs rankeados por exposure
+STAGE III — Scanner distribuído (ChimangoScan)               [EM ANDAMENTO]
+  └─ Fila: 504.837 jobs totais rankeados por exposure
+       done:    8.382 scans concluídos  (1,66%)
+       pending: 488.659 aguardando
+       skipped: 7.544 (pull falhou / imagem removida)
+       failed:  205
+       findings: 16.029.295 acumulados (merged, dedup entre scanners)
   └─ Workers distribuídos em múltiplos hosts consomem da mesma fila via HTTP
   └─ 6 scanners estáticos por imagem: syft, trivy, grype, osv, dockle, trufflehog
 ```
